@@ -77,6 +77,33 @@ interface DashboardContextValue {
 
 const DashboardContext = createContext<DashboardContextValue | null>(null)
 const THEME_KEY = 'hera-admin-theme'
+const AUTH_ERROR = 'Sign in required'
+
+function isAuthError(err: unknown) {
+  return err instanceof Error && err.message === AUTH_ERROR
+}
+
+function errorText(err: unknown, fallback = 'Something went wrong') {
+  return err instanceof Error && err.message ? err.message : fallback
+}
+
+/** crypto.randomUUID only exists on HTTPS/localhost, so fall back on plain HTTP. */
+function makeId() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  } catch {
+    /* fall through */
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function readTheme(): Theme {
+  try {
+    return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'
+  } catch {
+    return 'light'
+  }
+}
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const api = useMemo(() => createPharmacyApi(), [])
@@ -87,11 +114,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [activeStoreId, setActiveStoreId] = useState<string | null>(() => workspaceFromHash() || null)
   const [signedIn, setSignedIn] = useState(() => Boolean(authToken()))
   const [toasts, setToasts] = useState<ToastItem[]>([])
-  const [theme, setThemeState] = useState<Theme>(() => {
-    const stored = localStorage.getItem(THEME_KEY)
-    return stored === 'dark' ? 'dark' : 'light'
-  })
+  const [theme, setThemeState] = useState<Theme>(readTheme)
   const toastTimer = useRef<number[]>([])
+  const autoStoreRef = useRef(false)
+
   const visiblePharmacies = useMemo(() => {
     if (!snapshot) return []
     const assigned = snapshot.admin.assignedStoreIds
@@ -114,15 +140,25 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [snapshot, visiblePharmacies])
 
   const activeStore = filteredSnapshot?.pharmacies.find((item) => item.id === activeStoreId) ?? null
-  const autoStoreRef = useRef(false)
 
   const toast = useCallback((text: string) => {
-    const id = crypto.randomUUID()
+    const id = makeId()
     setToasts((current) => [...current, { id, text }])
     const timer = window.setTimeout(() => {
       setToasts((current) => current.filter((item) => item.id !== id))
+      toastTimer.current = toastTimer.current.filter((item) => item !== timer)
     }, 2800)
     toastTimer.current.push(timer)
+  }, [])
+
+  /** Clears the session. Used by sign out and when the token expires mid-session. */
+  const expireSession = useCallback(() => {
+    setAuthToken('')
+    setSnapshot(null)
+    setActiveStoreId(null)
+    setToasts([])
+    autoStoreRef.current = false
+    setSignedIn(false)
   }, [])
 
   const reload = useCallback(async () => {
@@ -138,33 +174,32 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       return
     }
     let cancel = false
-    const timer = window.setTimeout(() => {
-      api
-        .getSnapshot()
-        .then((next) => {
-          if (cancel) return
-          setSnapshot(next)
-          setLoading(false)
-        })
-        .catch((err: unknown) => {
-          if (cancel) return
-          if (err instanceof Error && err.message === 'Sign in required') {
-            setAuthToken('')
-            setSignedIn(false)
-          }
-          setError(err instanceof Error ? err.message : 'Could not load the dashboard')
-          setLoading(false)
-        })
-    }, 280)
+    api
+      .getSnapshot()
+      .then((next) => {
+        if (cancel) return
+        setSnapshot(next)
+        setError('')
+        setLoading(false)
+      })
+      .catch((err: unknown) => {
+        if (cancel) return
+        if (isAuthError(err)) expireSession()
+        setError(errorText(err, 'Could not load the dashboard'))
+        setLoading(false)
+      })
     return () => {
       cancel = true
-      window.clearTimeout(timer)
     }
-  }, [api, signedIn])
+  }, [api, signedIn, expireSession])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    localStorage.setItem(THEME_KEY, theme)
+    try {
+      localStorage.setItem(THEME_KEY, theme)
+    } catch {
+      /* storage unavailable (private mode) */
+    }
   }, [theme])
 
   useEffect(() => {
@@ -231,17 +266,29 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const run = useCallback(
     async (task: (client: PharmacyAdminApi) => Promise<void>, success: string) => {
+      // Step 1: the action itself. If this fails, nothing was saved.
       try {
         await task(api)
-        await reload()
-        toast(success)
-        return true
       } catch (err) {
-        toast(err instanceof Error ? err.message : 'Something went wrong')
+        if (isAuthError(err)) expireSession()
+        toast(errorText(err))
         return false
       }
+      // Step 2: refresh the list. The action already succeeded, so never report failure here
+      // (otherwise the user retries and e.g. restocks twice).
+      try {
+        await reload()
+        toast(success)
+      } catch (err) {
+        if (isAuthError(err)) {
+          expireSession()
+          return true
+        }
+        toast(`${success}, but the list could not refresh. Please reload the page.`)
+      }
+      return true
     },
-    [api, reload, toast],
+    [api, reload, toast, expireSession],
   )
 
   const value = useMemo<DashboardContextValue>(
@@ -269,30 +316,42 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           setSignedIn(true)
           return true
         } catch (err) {
-          toast(err instanceof Error ? err.message : 'Sign in failed')
+          toast(errorText(err, 'Sign in failed'))
           return false
         }
       },
-      signOut: () => {
-        setAuthToken('')
-        setSnapshot(null)
-        setActiveStoreId(null)
-        setSignedIn(false)
-      },
+      signOut: expireSession,
       reload,
       notify: toast,
       run,
       updateOrderStatus: (id, status) => run((client) => client.updateOrderStatus(id, status), 'Order updated'),
       createMedicine: async (input) => {
+        let id: string
         try {
           const created = await api.createMedicine(input)
-          await reload()
-          toast('Medicine added')
-          return created.id
+          if (!created?.id) {
+            toast('Medicine was not saved')
+            return null
+          }
+          id = created.id
         } catch (err) {
-          toast(err instanceof Error ? err.message : 'Something went wrong')
+          if (isAuthError(err)) expireSession()
+          toast(errorText(err))
           return null
         }
+        // The medicine is saved. A failed refresh must not look like a failed save,
+        // or the user adds it again and creates a duplicate.
+        try {
+          await reload()
+          toast('Medicine added')
+        } catch (err) {
+          if (isAuthError(err)) {
+            expireSession()
+            return id
+          }
+          toast('Medicine added, but the list could not refresh. Please reload the page.')
+        }
+        return id
       },
       updateMedicine: (id, patch) => run((client) => client.updateMedicine(id, patch), 'Medicine updated'),
       deactivateMedicine: (id) => run((client) => client.deactivateMedicine(id), 'Medicine deactivated'),
@@ -311,18 +370,17 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             toast('Store was not saved')
             return null
           }
-          await reload()
-          const next = await api.getSnapshot()
+          const next = await reload()
           const confirmed = next.pharmacies.some((item) => item.id === created.id)
           if (!confirmed) {
             toast('Store save could not be confirmed. Refresh and try again.')
             return null
           }
-          setSnapshot(next)
           toast(input.status === 'draft' ? 'Draft store saved' : 'Store added')
           return created.id
-        } catch (error) {
-          toast(error instanceof Error ? error.message : 'Could not add store')
+        } catch (err) {
+          if (isAuthError(err)) expireSession()
+          toast(errorText(err, 'Could not add store'))
           return null
         }
       },
@@ -337,7 +395,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       recordPayout: (amount, note) => run((client) => client.recordPayout(amount, note), 'Payout recorded'),
       restock: (medicineId, quantity) => run((client) => client.restock(medicineId, quantity), 'Stock updated'),
     }),
-    [api, filteredSnapshot, loading, error, theme, page, activeStoreId, activeStore, signedIn, toasts, go, openStore, exitStore, reload, run, toast],
+    [api, filteredSnapshot, loading, error, theme, page, activeStoreId, activeStore, signedIn, toasts, go, openStore, exitStore, reload, run, toast, expireSession],
   )
 
   return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>

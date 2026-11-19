@@ -5,6 +5,7 @@ import {
   BarChart3,
   Bell,
   ChevronDown,
+  ClipboardList,
   Clock,
   HeartPulse,
   LayoutGrid,
@@ -26,6 +27,7 @@ import {
 import { useDashboard } from '../context/DashboardContext'
 import { STORE_TOP_NAV, TOP_NAV } from '../nav'
 import type { PageId } from '../types'
+import { AuditPage } from '../pages/Audit'
 import { CustomersPage } from '../pages/Customers'
 import { MedicinesPage } from '../pages/Medicines'
 import { MessagesPage } from '../pages/Messages'
@@ -52,6 +54,7 @@ const PAGES: Record<PageId, () => ReactNode> = {
   reminders: RemindersPage,
   mobile: MobileAppPage,
   reports: ReportsPage,
+  audit: AuditPage,
   messages: MessagesPage,
   settings: SettingsPage,
 }
@@ -66,6 +69,7 @@ const RAIL: { id: PageId; label: string; icon: typeof LayoutGrid }[] = [
   { id: 'reminders', label: 'Reminders', icon: HeartPulse },
   { id: 'mobile', label: 'Mobile App', icon: Smartphone },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
+  { id: 'audit', label: 'Audit', icon: ClipboardList },
   { id: 'messages', label: 'Messages', icon: MessageSquare },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
@@ -108,7 +112,8 @@ export function Shell() {
   } = dash
   const inStore = Boolean(activeStoreId && activeStore)
   const topNav = inStore ? STORE_TOP_NAV : TOP_NAV
-  const rail = inStore ? STORE_RAIL : RAIL
+  const isOwner = snapshot?.admin.roleKey === 'ADMIN'
+  const rail = inStore ? STORE_RAIL : RAIL.filter((item) => item.id !== 'audit' || isOwner)
 
   useEffect(() => {
     setPanel(null)

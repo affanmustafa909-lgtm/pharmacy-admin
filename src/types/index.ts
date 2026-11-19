@@ -13,6 +13,7 @@ export type PageId =
   | 'reminders'
   | 'mobile'
   | 'reports'
+  | 'audit'
   | 'messages'
   | 'settings'
 
