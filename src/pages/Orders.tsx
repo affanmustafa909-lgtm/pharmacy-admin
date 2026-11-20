@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { OrderDetail } from '../components/OrderDetail'
 import { OrderTable } from '../components/OrderTable'
 import { useDashboard } from '../context/DashboardContext'
+import { money } from '../lib/format'
 import { hashQuery } from '../nav'
 import type { OrderStatus } from '../types'
 
@@ -32,6 +33,17 @@ export function OrdersPage() {
       return statusOk && customerOk && storeOk && text.includes(query.trim().toLowerCase())
     })
   }, [data.orders, preset, query, status, activeStoreId])
+
+  const totals = useMemo(() => {
+    const active = orders.filter((order) => order.status !== 'cancelled')
+    return {
+      count: orders.length,
+      products: active.reduce((sum, order) => sum + (order.productSubtotal ?? 0), 0),
+      delivery: active.reduce((sum, order) => sum + (order.deliveryCharge ?? 0), 0),
+      total: active.reduce((sum, order) => sum + order.total, 0),
+    }
+  }, [orders])
+
   const customer = data.customers.find((item) => item.id === preset)
 
   return (
@@ -48,6 +60,26 @@ export function OrdersPage() {
           </p>
         </div>
       </div>
+
+      <section className="order-summary-strip">
+        <article className="card">
+          <div className="stat-top">Orders</div>
+          <div className="order-strip-value">{totals.count}</div>
+        </article>
+        <article className="card">
+          <div className="stat-top">Products subtotal</div>
+          <div className="order-strip-value">{money(totals.products)}</div>
+        </article>
+        <article className="card">
+          <div className="stat-top">Delivery charges</div>
+          <div className="order-strip-value">{money(totals.delivery)}</div>
+        </article>
+        <article className="card">
+          <div className="stat-top">Total revenue</div>
+          <div className="order-strip-value">{money(totals.total)}</div>
+        </article>
+      </section>
+
       <article className="card">
         <div className="table-head">
           <div className="inline-actions">

@@ -172,13 +172,16 @@ export interface AdminOrder {
   paymentStatus?: PaymentStatus
   channel: string
   deliveryType?: string
+  deliveryDistanceKm?: number | null
   paymentLabel?: string
   addressLine?: string
+  prescriptionNumber?: string
   createdAt: string
   productSubtotal?: number
   deliveryCharge?: number
   serviceCharge?: number
   bfpCharge?: number
+  discount?: number
   charges?: { kind: string; label: string; amount: number; mode?: string; rate?: number; percentBase?: string | null }[]
 }
 
@@ -244,12 +247,29 @@ export interface Prescription {
   customerNote?: string
 }
 
+export interface CustomerAddressSummary {
+  id: string
+  label: string
+  line: string
+  street?: string
+  subCity?: string
+  city?: string
+  state?: string
+  country?: string
+  postalCode?: string
+}
+
 export interface Customer {
   id: string
+  lastLogin?: string | null
   name: string
   email: string
   phone: string
   city: string
+  dateOfBirth?: string
+  gender?: string
+  allergies?: string
+  addresses?: CustomerAddressSummary[]
   orders: number
   spend: number
   status: 'active' | 'inactive'
@@ -264,6 +284,9 @@ export interface PharmacyFee {
   amount: number
   percentBase?: string | null
   deliveryType?: string | null
+  minDistanceKm?: number | null
+  maxDistanceKm?: number | null
+  perKmRate?: number | null
 }
 
 export interface PharmacyLocation {
@@ -271,6 +294,9 @@ export interface PharmacyLocation {
   code?: string
   name: string
   address: string
+  city?: string
+  country?: string
+  maxDeliveryDistanceKm?: number | null
   openUntil: string
   weeklyHours?: Record<string, { open: string; close: string } | null>
   rating: number

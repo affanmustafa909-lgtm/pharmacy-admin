@@ -14,6 +14,7 @@ import {
   Split,
   Moon,
   Pill,
+  RefreshCw,
   Search,
   Settings,
   ShoppingBag,
@@ -243,6 +244,15 @@ export function Shell() {
             })}
           </nav>
           <div className="tool-group">
+            <button
+              className="icon-btn"
+              type="button"
+              aria-label="Refresh orders and data"
+              title="Refresh data"
+              onClick={() => void reload()}
+            >
+              <RefreshCw size={16} />
+            </button>
             <button className="icon-btn" type="button" aria-label="Search" onClick={() => setPanel('search')}><Search size={16} /></button>
             <button className="icon-btn" type="button" aria-label="Notifications" onClick={() => setPanel(panel === 'notices' ? null : 'notices')}>
               <Bell size={16} />
@@ -355,9 +365,12 @@ export function Shell() {
           {panel === 'activity' && snapshot ? (
             <motion.div className="popover" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <div className="pop-head"><strong>Recent orders</strong></div>
-              {snapshot.orders.slice(0, 5).map((order) => (
+              {snapshot.orders
+                .filter((order) => !activeStoreId || order.pharmacyId === activeStoreId)
+                .slice(0, 5)
+                .map((order) => (
                 <button key={order.id} className="notice" type="button" onClick={() => go('orders')}>
-                  <b>{order.id}</b>
+                  <b>{order.id} · ${order.total.toFixed(2)}</b>
                   <span>{order.customerName} · {order.itemSummary}</span>
                 </button>
               ))}

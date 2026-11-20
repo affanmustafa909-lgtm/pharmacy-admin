@@ -18,7 +18,7 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
   }
   const token = authToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers })
+  const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store', ...init, headers })
   if (response.status === 401) {
     setAuthToken('')
     throw new Error('Sign in required')

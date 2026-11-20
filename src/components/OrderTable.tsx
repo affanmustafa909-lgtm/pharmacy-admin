@@ -10,16 +10,16 @@ export function OrderTable({ orders, onOpen }: { orders: AdminOrder[]; onOpen: (
   }
 
   return (
-    <div className="table-wrap">
+    <div className="table-wrap orders-table">
       <table>
         <thead>
           <tr>
             <th>Order</th>
             <th>Customer</th>
             <th>Items</th>
-            <th>Products</th>
-            <th>Delivery</th>
-            <th>Total</th>
+            <th className="num-col">Products</th>
+            <th className="num-col">Delivery</th>
+            <th className="num-col">Total</th>
             <th>Status</th>
             <th>Date</th>
           </tr>
@@ -27,18 +27,35 @@ export function OrderTable({ orders, onOpen }: { orders: AdminOrder[]; onOpen: (
         <tbody>
           {orders.map((order) => (
             <tr key={order.id} onClick={() => onOpen(order.id)}>
-              <td className="id-cell">{order.id}</td>
+              <td className="id-cell">
+                <div>{order.id}</div>
+                <div className="mini">{order.paymentLabel || order.paymentStatus || order.channel}</div>
+              </td>
               <td>
                 <strong>{order.customerName}</strong>
                 <div className="mini">{order.customerPhone || order.customerEmail || order.channel}</div>
               </td>
               <td>
-                {order.itemSummary}
-                <div className="mini">{order.pharmacyName}{order.deliveryType ? ` · ${order.deliveryType}` : ''}</div>
+                <div className="order-items-cell">{order.itemSummary}</div>
+                <div className="mini">
+                  {order.pharmacyName}
+                  {order.deliveryType ? ` · ${order.deliveryType}` : ''}
+                  {order.deliveryDistanceKm != null ? ` · ${order.deliveryDistanceKm.toFixed(1)} km` : ''}
+                </div>
               </td>
-              <td>{money(order.productSubtotal ?? 0)}</td>
-              <td>{money(order.deliveryCharge ?? 0)}</td>
-              <td><strong>{money(order.total)}</strong></td>
+              <td className="num-col">{money(order.productSubtotal ?? 0)}</td>
+              <td className="num-col">
+                <div>{money(order.deliveryCharge ?? 0)}</div>
+                {order.deliveryDistanceKm != null ? (
+                  <div className="mini">{order.deliveryDistanceKm.toFixed(1)} km</div>
+                ) : null}
+              </td>
+              <td className="num-col">
+                <strong>{money(order.total)}</strong>
+                {(order.discount ?? 0) > 0 ? (
+                  <div className="mini">-{money(order.discount ?? 0)}</div>
+                ) : null}
+              </td>
               <td onClick={(event) => event.stopPropagation()}>
                 <label className="status-edit">
                   <i className={`dot ${order.status}`} />
@@ -58,7 +75,7 @@ export function OrderTable({ orders, onOpen }: { orders: AdminOrder[]; onOpen: (
                   </select>
                 </label>
               </td>
-              <td>{formatWhen(order.createdAt)}</td>
+              <td className="date-col">{formatWhen(order.createdAt)}</td>
             </tr>
           ))}
         </tbody>
