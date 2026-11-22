@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Copy, Eye, Pause, Plus, RotateCw, Shield, ShoppingBag, Bell, Pencil, Trash2, PackagePlus, ImagePlus } from 'lucide-react'
+import { Eye, Pause, Plus, RotateCw, Shield, ShoppingBag, Bell, Pencil, Trash2, PackagePlus, ImagePlus } from 'lucide-react'
 import { Modal } from '../components/Modal'
 import { ProductImport } from '../components/ProductImport'
 import { Toggle } from '../components/Toggle'
@@ -8,7 +8,195 @@ import { money } from '../lib/format'
 import { hashQuery } from '../nav'
 import { API_BASE, apiFetch } from '../services/http'
 
+interface StockMove {
+  id: string
+  quantity: number
+  reason: string
+  note: string
+  orderNumber: string
+  staffName: string
+  createdAt: string
+}
+
+const REASON_LABEL: Record<string, string> = {
+  restock: 'Restock',
+  order_fulfillment: 'Order deduction',
+  cancellation_release: 'Cancellation release',
+  damage: 'Damage',
+  expiry: 'Expired write-off',
+  manual_adjustment: 'Manual adjustment',
+  import: 'Import',
+}
+
+function StockHistory({ productId, stock, onChanged }: { productId: string; stock: number; onChanged: () => void }) {
+  const [rows, setRows] = useState<StockMove[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [filter, setFilter] = useState('all')
+  const [qty, setQty] = useState('')
+  const [reason, setReason] = useState('restock')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function load() {
+    try {
+      const data = (await apiFetch(`/admin/stock/${productId}/history`)) as { movements: StockMove[] }
+      setRows(data.movements)
+      setError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load stock history')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+  }, [productId, stock])
+
+  async function adjust() {
+    const quantity = Number(qty)
+    if (!Number.isInteger(quantity) || quantity === 0) {
+      setError('Enter a whole number (not 0)')
+      return
+    }
+    if (note.trim().length < 3) {
+      setError('Add a short reason')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await apiFetch(`/admin/stock/${productId}/adjust`, {
+        method: 'POST',
+        body: JSON.stringify({ quantity, reason, note: note.trim() }),
+      })
+      setQty('')
+      setNote('')
+      onChanged()
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not adjust stock')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const shown = rows.filter((row) => filter === 'all' || row.reason === filter)
+
+  return (
+    <section className="card" style={{ marginTop: 16 }}>
+      <div className="block-head">
+        <h2>Stock history</h2>
+        <select className="select" value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="History type">
+          <option value="all">All movements</option>
+          {Object.entries(REASON_LABEL).map(([key, label]) => (
+            <option key={key} value={key}>{label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="btn-row" style={{ marginBottom: 12 }}>
+        <select className="select" value={reason} onChange={(event) => setReason(event.target.value)} aria-label="Adjustment type">
+          <option value="restock">Restock (+)</option>
+          <option value="damage">Damage (-)</option>
+          <option value="expiry">Expired write-off (-)</option>
+          <option value="manual_adjustment">Manual adjustment (+ or -)</option>
+        </select>
+        <input className="select" style={{ width: 110 }} value={qty} onChange={(event) => setQty(event.target.value)} placeholder="Quantity" inputMode="numeric" />
+        <input className="select" style={{ minWidth: 220 }} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Reason (required)" />
+        <button className="btn-dark" type="button" disabled={saving} onClick={() => void adjust()}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+      {error ? <p style={{ color: '#d92d20' }}>{error}</p> : null}
+
+      {loading ? (
+        <div className="empty">Loading history…</div>
+      ) : shown.length === 0 ? (
+        <div className="empty">No stock movements yet.</div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Qty</th>
+                <th>Reason</th>
+                <th>Staff</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((row) => (
+                <tr key={row.id}>
+                  <td>{new Date(row.createdAt).toLocaleString()}</td>
+                  <td>{REASON_LABEL[row.reason] ?? row.reason}</td>
+                  <td style={{ color: row.quantity < 0 ? '#d92d20' : '#1f7a4d', fontWeight: 600 }}>
+                    {row.quantity > 0 ? `+${row.quantity}` : row.quantity}
+                  </td>
+                  <td>{[row.note, row.orderNumber].filter(Boolean).join(' · ') || '—'}</td>
+                  <td>{row.staffName}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
 const CATEGORY_OPTIONS = ['Medicines', 'Vitamins', 'Supplements', 'Devices']
+
+/** Medicines with this many days (or fewer) left show as expiring in red. */
+const EXPIRY_WARN_DAYS = 60
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+function parseExpiry(value?: string): Date | null {
+  const text = (value ?? '').trim()
+  const full = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
+  if (full) return new Date(Number(full[1]), Number(full[2]) - 1, Number(full[3]), 23, 59, 59)
+  const match = /^(\d{1,2})\/(\d{2}|\d{4})$/.exec(text)
+  if (!match) return null
+  const month = Number(match[1])
+  let year = Number(match[2])
+  if (year < 100) year += 2000
+  if (month < 1 || month > 12) return null
+  return new Date(year, month, 0, 23, 59, 59)
+}
+
+function pad(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+function toIsoDate(date: Date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function todayIso() {
+  return toIsoDate(new Date())
+}
+
+/** Converts any supported expiry format (YYYY-MM-DD or MM/YY) to YYYY-MM-DD for the date input. */
+function expiryToIso(value?: string) {
+  const date = parseExpiry(value)
+  return date ? toIsoDate(date) : ''
+}
+
+function daysLeft(value?: string): number | null {
+  const date = parseExpiry(value)
+  if (!date) return null
+  return Math.ceil((date.getTime() - Date.now()) / 86400000)
+}
+
+function expiryInfo(value?: string): { state: 'expired' | 'soon' | 'ok'; label: string } {
+  const days = daysLeft(value)
+  if (days === null) return { state: 'ok', label: value || '—' }
+  if (days <= 0) return { state: 'expired', label: 'Expired' }
+  if (days <= EXPIRY_WARN_DAYS) return { state: 'soon', label: `${days} ${days === 1 ? 'day' : 'days'} left` }
+  return { state: 'ok', label: value ?? '' }
+}
 
 function productImageSrc(imageUrl?: string) {
   if (!imageUrl) return ''
@@ -23,9 +211,9 @@ const emptyForm = () => ({
   strength: '',
   category: 'Medicines',
   customCategory: '',
-  price: '12',
+  price: '',
   unitLabel: '30 tablets',
-  stock: '20',
+  stock: '',
   sku: '',
   description: '',
   batch: '',
@@ -38,9 +226,13 @@ const emptyForm = () => ({
 export function MedicinesPage() {
   const { snapshot, updateMedicine, createMedicine, deactivateMedicine, deleteMedicine, restock, notify, reload, activeStoreId, activeStore } = useDashboard()
   const presetStore = hashQuery('store')
+  const allMedicines = snapshot?.medicines ?? []
+  const pharmacies = snapshot?.pharmacies ?? []
+  const threshold = snapshot?.settings.lowStockThreshold ?? 0
+
   const [storeFilter, setStoreFilter] = useState(activeStoreId || presetStore || 'all')
   const [search, setSearch] = useState('')
-  const [selectedId, setSelectedId] = useState<string | null>(snapshot!.medicines[0]?.id ?? null)
+  const [selectedId, setSelectedId] = useState<string | null>(allMedicines[0]?.id ?? null)
 
   useEffect(() => {
     if (activeStoreId) setStoreFilter(activeStoreId)
@@ -49,7 +241,10 @@ export function MedicinesPage() {
   const [flipped, setFlipped] = useState(false)
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
-  const [editing, setEditing] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [originalExpiry, setOriginalExpiry] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [restocking, setRestocking] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [restockOpen, setRestockOpen] = useState(false)
@@ -57,22 +252,25 @@ export function MedicinesPage() {
   const [pendingImage, setPendingImage] = useState<File | null>(null)
   const [imageEditOpen, setImageEditOpen] = useState(false)
   const [categories, setCategories] = useState<string[]>(CATEGORY_OPTIONS)
-  const [stockFilter, setStockFilter] = useState<'all' | 'in_stock' | 'low' | 'out'>('all')
-  const threshold = snapshot!.settings.lowStockThreshold
+  const [stockFilter, setStockFilter] = useState<'all' | 'in_stock' | 'low' | 'out' | 'expiring' | 'expired'>('all')
+  const editing = editingId !== null
 
   const medicines = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return snapshot!.medicines.filter((item) => {
+    return allMedicines.filter((item) => {
       if (storeFilter !== 'all' && item.storeId !== storeFilter) return false
-      const outOfStock = item.stock === 0 && item.onlineSale && !item.held
+      const outOfStock = item.stock <= 0
       const low = item.lowStockAlerts && item.stock > 0 && item.stock <= threshold
       if (stockFilter === 'out' && !outOfStock) return false
       if (stockFilter === 'low' && !low) return false
-      if (stockFilter === 'in_stock' && (outOfStock || item.stock === 0)) return false
+      if (stockFilter === 'in_stock' && outOfStock) return false
+      const expState = expiryInfo(item.expiry).state
+      if (stockFilter === 'expiring' && expState !== 'soon') return false
+      if (stockFilter === 'expired' && expState !== 'expired') return false
       if (!q) return true
-      return `${item.name} ${item.sku} ${item.brand} ${item.category}`.toLowerCase().includes(q)
+      return `${item.name} ${item.genericName ?? ''} ${item.sku} ${item.brand} ${item.category} ${item.batch ?? ''}`.toLowerCase().includes(q)
     })
-  }, [snapshot, storeFilter, search, stockFilter, threshold])
+  }, [allMedicines, storeFilter, search, stockFilter, threshold])
 
   const index = Math.max(0, medicines.findIndex((item) => item.id === selectedId))
   const medicine = medicines.find((item) => item.id === selectedId) ?? medicines[0]
@@ -81,7 +279,7 @@ export function MedicinesPage() {
     apiFetch('/admin/categories')
       .then((payload) => setCategories((payload as { categories: string[] }).categories))
       .catch(() => setCategories(CATEGORY_OPTIONS))
-  }, [snapshot?.medicines.length])
+  }, [allMedicines.length])
 
   useEffect(() => {
     setFlipped(false)
@@ -97,11 +295,40 @@ export function MedicinesPage() {
     }
   }, [medicines, selectedId])
 
-  const low = medicines.filter((item) => item.lowStockAlerts && item.stock <= threshold)
+  if (!snapshot) {
+    return <div className="empty">Loading medicines…</div>
+  }
+
+  const low = medicines.filter((item) => item.lowStockAlerts && item.stock > 0 && item.stock <= threshold)
+  const expiredCount = medicines.filter((item) => expiryInfo(item.expiry).state === 'expired').length
+  const expiringCount = medicines.filter((item) => expiryInfo(item.expiry).state === 'soon').length
+  const storeMeds = allMedicines.filter((item) => storeFilter === 'all' || item.storeId === storeFilter)
+  const alertOut = storeMeds.filter((item) => item.stock <= 0)
+  const alertLow = storeMeds.filter((item) => item.lowStockAlerts && item.stock > 0 && item.stock <= threshold)
+  const alertSoon = storeMeds.filter((item) => expiryInfo(item.expiry).state === 'soon')
+  const alertExpired = storeMeds.filter((item) => expiryInfo(item.expiry).state === 'expired')
+  const alertTiles = [
+    { key: 'out' as const, label: 'Out of stock', list: alertOut },
+    { key: 'low' as const, label: 'Low stock', list: alertLow },
+    { key: 'expiring' as const, label: 'Expiring soon', list: alertSoon },
+    { key: 'expired' as const, label: 'Expired', list: alertExpired },
+  ]
 
   function selectMedicine(id: string) {
     setSelectedId(id)
     setFlipped(false)
+  }
+
+  function validImage(file: File) {
+    if (!file.type.startsWith('image/')) {
+      notify('Please choose an image file')
+      return false
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      notify('Image is too large (max 5 MB)')
+      return false
+    }
+    return true
   }
 
   async function uploadImage(productId: string, file: File) {
@@ -113,6 +340,7 @@ export function MedicinesPage() {
 
   async function changeMedicineImage(file: File | null) {
     if (!medicine || !file) return
+    if (!validImage(file)) return
     try {
       await uploadImage(medicine.id, file)
       await reload()
@@ -124,25 +352,28 @@ export function MedicinesPage() {
   }
 
   function openNew() {
-    setEditing(false)
+    setEditingId(null)
+    setOriginalExpiry('')
     setPendingImage(null)
     setForm({
       ...emptyForm(),
-      storeId: activeStoreId || (storeFilter !== 'all' ? storeFilter : snapshot!.pharmacies[0]?.id ?? ''),
+      storeId: activeStoreId || (storeFilter !== 'all' ? storeFilter : pharmacies[0]?.id ?? ''),
     })
     setOpen(true)
   }
 
   function openEdit(targetId?: string) {
     const target = targetId
-      ? snapshot!.medicines.find((item) => item.id === targetId)
+      ? allMedicines.find((item) => item.id === targetId)
       : medicine
     if (!target) return
+    const iso = expiryToIso(target.expiry)
     setSelectedId(target.id)
-    setEditing(true)
+    setEditingId(target.id)
+    setOriginalExpiry(iso)
     setPendingImage(null)
     setForm({
-      storeId: target.storeId ?? snapshot!.pharmacies[0]?.id ?? '',
+      storeId: target.storeId ?? pharmacies[0]?.id ?? '',
       name: target.name,
       brand: target.brand,
       genericName: target.genericName ?? '',
@@ -155,7 +386,7 @@ export function MedicinesPage() {
       sku: target.sku,
       description: target.description,
       batch: target.batch,
-      expiry: target.expiry,
+      expiry: iso,
       rxRequired: target.rxRequired,
       onlineSale: target.onlineSale,
       imageUrl: target.imageUrl ?? '',
@@ -163,66 +394,128 @@ export function MedicinesPage() {
     setOpen(true)
   }
 
-  function resolvedCategory() {
-    return form.category === '__custom__' ? form.customCategory.trim() || 'Medicines' : form.category
+  function closeForm() {
+    setOpen(false)
+    setPendingImage(null)
   }
 
   async function saveMedicine() {
-    if (!form.name.trim()) {
+    if (saving) return
+
+    const name = form.name.trim()
+    if (!name) {
       notify('Enter a medicine name')
       return
     }
+    if (form.category === '__custom__' && !form.customCategory.trim()) {
+      notify('Enter a custom category')
+      return
+    }
+    const price = Number(form.price)
+    if (form.price.trim() === '' || !Number.isFinite(price) || price <= 0) {
+      notify('Enter a valid price greater than 0')
+      return
+    }
+    const stock = Number(form.stock)
+    if (form.stock.trim() === '' || !Number.isInteger(stock) || stock < 0) {
+      notify('Stock must be a whole number (0 or more)')
+      return
+    }
+    const expiry = form.expiry.trim()
+    if (expiry && expiry < todayIso() && (!editing || expiry !== originalExpiry)) {
+      notify('Expiry date is in the past')
+      return
+    }
+    if (pendingImage && !validImage(pendingImage)) return
+
+    const storeId = form.storeId || pharmacies[0]?.id || ''
+    const batch = form.batch.trim()
+    const duplicate = allMedicines.some(
+      (item) =>
+        item.id !== editingId &&
+        item.storeId === storeId &&
+        item.name.trim().toLowerCase() === name.toLowerCase() &&
+        (item.batch ?? '').trim().toLowerCase() === batch.toLowerCase(),
+    )
+    if (duplicate) {
+      notify('This medicine with the same batch already exists in this store')
+      return
+    }
+
     const payload = {
-      storeId: form.storeId || snapshot!.pharmacies[0]?.id || '',
-      name: form.name.trim(),
+      storeId,
+      name,
       brand: form.brand.trim() || 'hera.',
       genericName: form.genericName.trim() || undefined,
       strength: form.strength.trim() || undefined,
-      category: resolvedCategory(),
-      price: Number(form.price),
+      category: form.category === '__custom__' ? form.customCategory.trim() : form.category,
+      price,
       unitLabel: form.unitLabel.trim() || '1 unit',
-      stock: Number(form.stock),
+      stock,
       sku: form.sku.trim() || undefined,
       description: form.description.trim() || undefined,
-      batch: form.batch.trim() || undefined,
-      expiry: form.expiry.trim() || undefined,
+      batch: batch || undefined,
+      expiry: expiry || undefined,
       rxRequired: form.rxRequired,
       onlineSale: form.onlineSale,
       imageUrl: form.imageUrl.trim() || undefined,
     }
-    if (editing && medicine) {
-      const ok = await updateMedicine(medicine.id, payload)
-      if (!ok) return
+
+    setSaving(true)
+    try {
+      if (editingId) {
+        const ok = await updateMedicine(editingId, payload)
+        if (!ok) return
+        if (pendingImage) {
+          try {
+            await uploadImage(editingId, pendingImage)
+            await reload()
+            notify('Image uploaded')
+          } catch (error: unknown) {
+            notify(error instanceof Error ? error.message : 'Image upload failed')
+          }
+        }
+        closeForm()
+        return
+      }
+      const id = await createMedicine(payload)
+      if (!id) return
       if (pendingImage) {
         try {
-          await uploadImage(medicine.id, pendingImage)
+          await uploadImage(id, pendingImage)
           await reload()
           notify('Image uploaded')
         } catch (error: unknown) {
           notify(error instanceof Error ? error.message : 'Image upload failed')
         }
       }
-      setOpen(false)
-      setPendingImage(null)
+      setSearch('')
+      setStockFilter('all')
+      setStoreFilter(payload.storeId || 'all')
+      setSelectedId(id)
+      closeForm()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitRestock() {
+    if (!medicine || restocking) return
+    const quantity = Number(restockQty)
+    if (restockQty.trim() === '' || !Number.isInteger(quantity) || quantity <= 0) {
+      notify('Enter a whole number greater than 0')
       return
     }
-    const id = await createMedicine(payload)
-    if (!id) return
-    if (pendingImage) {
-      try {
-        await uploadImage(id, pendingImage)
-        await reload()
-        notify('Image uploaded')
-      } catch (error: unknown) {
-        notify(error instanceof Error ? error.message : 'Image upload failed')
-      }
+    setRestocking(true)
+    try {
+      const ok = await restock(medicine.id, quantity)
+      if (ok) setRestockOpen(false)
+    } finally {
+      setRestocking(false)
     }
-    setSearch('')
-    setStoreFilter(payload.storeId || 'all')
-    setSelectedId(id)
-    setOpen(false)
-    setPendingImage(null)
   }
+
+  const selectedExpiry = medicine ? expiryInfo(medicine.expiry) : null
 
   return (
     <>
@@ -241,7 +534,7 @@ export function MedicinesPage() {
           ) : (
             <select className="select" value={storeFilter} onChange={(event) => setStoreFilter(event.target.value)} aria-label="Store">
               <option value="all">All stores</option>
-              {snapshot!.pharmacies.map((pharmacy) => (
+              {pharmacies.map((pharmacy) => (
                 <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>
               ))}
             </select>
@@ -262,16 +555,44 @@ export function MedicinesPage() {
           style={{ minWidth: 240 }}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search name, SKU, brand…"
+          placeholder="Search name, brand, batch…"
           aria-label="Search medicines"
         />
-        {(['all', 'in_stock', 'low', 'out'] as const).map((filter) => (
+        {(['all', 'in_stock', 'low', 'out', 'expiring', 'expired'] as const).map((filter) => (
           <button key={filter} className={stockFilter === filter ? 'chip is-on' : 'chip'} type="button" onClick={() => setStockFilter(filter)}>
-            {filter === 'all' ? 'All stock' : filter === 'in_stock' ? 'In stock' : filter === 'low' ? 'Low' : 'Out of stock'}
+            {{ all: 'All stock', in_stock: 'In stock', low: 'Low stock', out: 'Out of stock', expiring: 'Expiring soon', expired: 'Expired' }[filter]}
           </button>
         ))}
-        <span className="count-pill">{medicines.length} shown{low.length ? ` · ${low.length} low` : ''}</span>
+        <span className="count-pill">
+          {medicines.length} shown
+          {low.length ? ` · ${low.length} low` : ''}
+          {expiredCount ? ` · ${expiredCount} expired` : ''}
+          {expiringCount ? ` · ${expiringCount} expiring` : ''}
+        </span>
       </div>
+
+      {alertTiles.some((tile) => tile.list.length > 0) ? (
+        <section className="card" style={{ marginBottom: 16 }}>
+          <div className="block-head">
+            <h2>Stock alerts</h2>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+            {alertTiles.map((tile) => (
+              <button
+                key={tile.key}
+                type="button"
+                className="btn-soft"
+                style={{ textAlign: 'left', padding: 14, opacity: tile.list.length ? 1 : 0.5 }}
+                onClick={() => setStockFilter(tile.key)}
+              >
+                <strong style={{ fontSize: 22, color: tile.list.length ? '#d92d20' : undefined }}>{tile.list.length}</strong>
+                <div>{tile.label}</div>
+                <small>{tile.list.slice(0, 3).map((item) => item.name).join(', ')}{tile.list.length > 3 ? '…' : ''}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="card" style={{ marginBottom: 16 }}>
         <div className="block-head">
@@ -287,18 +608,19 @@ export function MedicinesPage() {
                 <tr>
                   <th>Pic</th>
                   <th>Name</th>
-                  <th>SKU</th>
                   <th>Store</th>
                   <th>Category</th>
                   <th>Price</th>
                   <th>Stock</th>
+                  <th>Expiry</th>
                   <th>Status</th>
                   <th>Options</th>
                 </tr>
               </thead>
               <tbody>
                 {medicines.map((item) => {
-                  const outOfStock = item.stock === 0 && item.onlineSale && !item.held
+                  const outOfStock = item.stock <= 0
+                  const exp = expiryInfo(item.expiry)
                   return (
                   <tr
                     key={item.id}
@@ -314,13 +636,22 @@ export function MedicinesPage() {
                       )}
                     </td>
                     <td><strong>{item.name}</strong><div className="sub">{item.brand} · {item.unitLabel}</div></td>
-                    <td>{item.sku}</td>
                     <td>{item.storeName ?? '—'}</td>
                     <td>{item.category}</td>
                     <td>{money(item.price)}</td>
                     <td>{item.stock}</td>
                     <td>
-                      {outOfStock ? (
+                      {exp.state === 'ok' ? (
+                        item.expiry || '—'
+                      ) : (
+                        <span style={{ color: '#d92d20', fontWeight: 600 }}>
+                          {exp.label}
+                          <div className="sub" style={{ color: '#d92d20' }}>{item.expiry}</div>
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {outOfStock && item.onlineSale && !item.held ? (
                         <span className="tag off">Out of stock</span>
                       ) : (
                         <span className={item.held || !item.onlineSale ? 'tag off' : 'tag on'}>
@@ -370,14 +701,18 @@ export function MedicinesPage() {
                   <div className="brand-name">{medicine.storeName ? `${medicine.storeName} · ` : ''}{medicine.brand} · {medicine.category}</div>
                   <h3>{medicine.name}</h3>
                   <div className="sku-row">
-                    <div><small>SKU</small><b>{medicine.sku}</b></div>
-                    <div><small>EXP</small><b>{medicine.expiry}</b></div>
+                    <div>
+                      <small>EXP</small>
+                      <b style={selectedExpiry && selectedExpiry.state !== 'ok' ? { color: '#d92d20' } : undefined}>
+                        {medicine.expiry || '—'}
+                      </b>
+                    </div>
                     <div><small>STOCK</small><b>{medicine.stock}</b></div>
                   </div>
                 </div>
                 <div className="face back">
                   <div className="face-top"><span className="pill-lite">{medicine.unitLabel}</span><b>{money(medicine.price)}</b></div>
-                  <h3>Batch {medicine.batch}</h3>
+                  <h3>Batch {medicine.batch || '—'}</h3>
                   <p>{medicine.description}</p>
                 </div>
               </div>
@@ -396,17 +731,6 @@ export function MedicinesPage() {
               <Pause size={16} /> {medicine.held ? 'Release' : 'Hold'}
             </button>
             <button type="button" onClick={() => setFlipped(true)}><Eye size={16} /> Show detail</button>
-            <button
-              type="button"
-              onClick={() => {
-                void navigator.clipboard.writeText(medicine.sku).then(
-                  () => notify(`Copied ${medicine.sku}`),
-                  () => notify('Could not copy the SKU'),
-                )
-              }}
-            >
-              <Copy size={16} /> Copy SKU
-            </button>
             <button type="button" onClick={() => setFlipped((value) => !value)}><RotateCw size={16} /> Flip card</button>
           </div>
         </article>
@@ -447,14 +771,16 @@ export function MedicinesPage() {
         </article>
       </section> : null}
 
-      <Modal open={open} title={editing ? 'Edit medicine' : 'New medicine'} subtitle="Prices and stock save to the shared catalog and appear in the app when online sales are on." onClose={() => setOpen(false)}>
+      {medicine ? <StockHistory key={medicine.id} productId={medicine.id} stock={medicine.stock} onChanged={() => void reload()} /> : null}
+
+      <Modal open={open} title={editing ? 'Edit medicine' : 'New medicine'} subtitle="Prices and stock save to the shared catalog and appear in the app when online sales are on." onClose={closeForm}>
         <label className="field">Pharmacy
           <select
             value={form.storeId}
             disabled={Boolean(activeStoreId)}
             onChange={(event) => setForm({ ...form, storeId: event.target.value })}
           >
-            {snapshot!.pharmacies.map((pharmacy) => (
+            {pharmacies.map((pharmacy) => (
               <option key={pharmacy.id} value={pharmacy.id}>{pharmacy.name}</option>
             ))}
           </select>
@@ -470,9 +796,6 @@ export function MedicinesPage() {
         </label>
         <label className="field">Strength
           <input value={form.strength} onChange={(event) => setForm({ ...form, strength: event.target.value })} placeholder="e.g. 500mg" />
-        </label>
-        <label className="field">SKU
-          <input value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} placeholder="Auto if blank" />
         </label>
         <label className="field">Category
           <select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>
@@ -491,16 +814,21 @@ export function MedicinesPage() {
           <input value={form.unitLabel} onChange={(event) => setForm({ ...form, unitLabel: event.target.value })} />
         </label>
         <label className="field">Price
-          <input inputMode="decimal" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} />
+          <input inputMode="decimal" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} placeholder="e.g. 12.50" />
         </label>
         <label className="field">Stock
-          <input inputMode="numeric" value={form.stock} onChange={(event) => setForm({ ...form, stock: event.target.value })} />
+          <input inputMode="numeric" value={form.stock} onChange={(event) => setForm({ ...form, stock: event.target.value })} placeholder="e.g. 20" />
         </label>
         <label className="field">Batch
           <input value={form.batch} onChange={(event) => setForm({ ...form, batch: event.target.value })} placeholder="e.g. CC-26-041" />
         </label>
         <label className="field">Expiry
-          <input value={form.expiry} onChange={(event) => setForm({ ...form, expiry: event.target.value })} placeholder="e.g. 08/27" />
+          <input
+            type="date"
+            min={editing ? undefined : todayIso()}
+            value={form.expiry}
+            onChange={(event) => setForm({ ...form, expiry: event.target.value })}
+          />
         </label>
         <label className="field">Description
           <textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={3} />
@@ -514,6 +842,11 @@ export function MedicinesPage() {
             accept="image/*"
             onChange={(event) => {
               const file = event.target.files?.[0] ?? null
+              if (file && !validImage(file)) {
+                event.target.value = ''
+                setPendingImage(null)
+                return
+              }
               setPendingImage(file)
             }}
           />
@@ -527,9 +860,9 @@ export function MedicinesPage() {
           Requires a prescription
         </label>
         <div className="modal-actions">
-          <button className="btn-soft" type="button" onClick={() => setOpen(false)}>Cancel</button>
-          <button className="btn-dark" type="button" onClick={() => { void saveMedicine() }}>
-            {editing ? 'Save changes' : 'Add medicine'}
+          <button className="btn-soft" type="button" onClick={closeForm}>Cancel</button>
+          <button className="btn-dark" type="button" disabled={saving} onClick={() => { void saveMedicine() }}>
+            {saving ? 'Saving…' : editing ? 'Save changes' : 'Add medicine'}
           </button>
         </div>
       </Modal>
@@ -540,22 +873,8 @@ export function MedicinesPage() {
         </label>
         <div className="modal-actions">
           <button className="btn-soft" type="button" onClick={() => setRestockOpen(false)}>Cancel</button>
-          <button
-            className="btn-dark"
-            type="button"
-            onClick={() => {
-              if (!medicine) return
-              const quantity = Number(restockQty)
-              if (!Number.isFinite(quantity) || quantity <= 0) {
-                notify('Enter a positive quantity')
-                return
-              }
-              void restock(medicine.id, quantity).then((ok) => {
-                if (ok) setRestockOpen(false)
-              })
-            }}
-          >
-            Add stock
+          <button className="btn-dark" type="button" disabled={restocking} onClick={() => { void submitRestock() }}>
+            {restocking ? 'Adding…' : 'Add stock'}
           </button>
         </div>
       </Modal>
@@ -579,8 +898,11 @@ export function MedicinesPage() {
             type="file"
             accept="image/*"
             onChange={(event) => {
-              const file = event.target.files?.[0] ?? null
-              void changeMedicineImage(file)
+              const input = event.target
+              const file = input.files?.[0] ?? null
+              void changeMedicineImage(file).finally(() => {
+                input.value = ''
+              })
             }}
           />
         </label>

@@ -30,6 +30,7 @@ export const PAGE_IDS: PageId[] = [
   'reminders',
   'mobile',
   'reports',
+  'audit',
   'messages',
   'settings',
 ]

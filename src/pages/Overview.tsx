@@ -9,6 +9,19 @@ import { useDashboard } from '../context/DashboardContext'
 import { deltaText, greeting, money } from '../lib/format'
 import type { OrderStatus } from '../types'
 
+function parseExpiry(value: string): Date | null {
+  const text = (value ?? '').trim()
+  if (!text) return null
+  let m = text.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/)
+  if (m) return m[3] ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(+m[1], +m[2], 0)
+  m = text.match(/^(\d{1,2})\/(\d{4})$/)
+  if (m) return new Date(+m[2], +m[1], 0)
+  m = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1])
+  const d = new Date(text)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
 function Delta({ value, note }: { value: number; note: string }) {
   const up = value >= 0
   const Icon = up ? ArrowUpRight : ArrowDownRight
@@ -34,6 +47,18 @@ export function OverviewPage() {
   const scopedMeds = data.medicines.filter((item) => !activeStoreId || item.storeId === activeStoreId)
   const [medicineId, setMedicineId] = useState(scopedMeds[0]?.id ?? '')
   const [quantity, setQuantity] = useState('24')
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const expiryAlerts = scopedMeds
+    .map((item) => {
+      const date = parseExpiry(item.expiry)
+      if (!date) return null
+      const days = Math.ceil((date.getTime() - today.getTime()) / 86400000)
+      return { id: item.id, name: item.name, batch: item.batch, stock: item.stock, days }
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null && row.days <= 90)
+    .sort((a, b) => a.days - b.days)
 
   useEffect(() => {
     setStore(activeStoreId ?? 'all')
@@ -82,7 +107,7 @@ export function OverviewPage() {
           </article>
           <article className="card lift">
             <div className="stat-top">Expiring batches</div>
-            <div className="stat-value">{data.dashboardCounts.expiringBatches}</div>
+           <div className="stat-value">{expiryAlerts.length}</div>
           </article>
           <article className="card lift">
             <div className="stat-top">Orders today</div>
@@ -90,6 +115,35 @@ export function OverviewPage() {
           </article>
         </section>
       ) : null}
+
+      <article className="card" style={{ marginBottom: 16 }}>
+        <h2>Expiry alerts</h2>
+        <p className="sub">Batches expired or expiring within 90 days.</p>
+        {expiryAlerts.length === 0 ? (
+          <div className="empty">No batches near expiry.</div>
+        ) : (
+          <div className="table-wrap table-static">
+            <table>
+              <thead><tr><th>Medicine</th><th>Batch</th><th>Stock</th><th>Status</th></tr></thead>
+              <tbody>
+                {expiryAlerts.slice(0, 8).map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.name}</td>
+                    <td>{row.batch || '-'}</td>
+                    <td>{row.stock}</td>
+                    <td>
+                      <span className={row.days < 0 ? 'tag off' : 'tag on'}>
+                        {row.days < 0 ? `Expired ${-row.days}d ago` : `${row.days} days left`}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
+
       <section className="grid-3">
         <article className="card">
           <div className="card-label">
