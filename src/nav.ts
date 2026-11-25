@@ -22,6 +22,7 @@ export const PAGE_IDS: PageId[] = [
   'overview',
   'orders',
   'medicines',
+  'purchasing',
   'prescriptions',
   'customers',
   'pharmacies',
@@ -37,7 +38,6 @@ export const PAGE_IDS: PageId[] = [
 
 export function pageFromHash(hash = window.location.hash): PageId {
   const id = hash.replace('#', '').split('?')[0] as PageId
-  if (id === 'prescriptions') return 'overview'
   return PAGE_IDS.includes(id) ? id : 'overview'
 }
 

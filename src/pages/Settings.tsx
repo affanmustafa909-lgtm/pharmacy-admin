@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Toggle } from '../components/Toggle'
 import { useDashboard } from '../context/DashboardContext'
 import { usesRemoteApi } from '../services/api'
+import { apiFetch } from '../services/http'
 
 export function SettingsPage() {
   const { snapshot, updateSettings, updatePharmacy, setPharmacyOpen, activeStore, activeStoreId } = useDashboard()
@@ -102,6 +103,7 @@ export function SettingsPage() {
             <div className="profile-stat"><span>Orders today</span><b>{activeStore.ordersToday}</b></div>
           </article>
         </section>
+        <AccountCard />
       </>
     )
   }
@@ -166,6 +168,68 @@ export function SettingsPage() {
           <div className="profile-stat"><span>Store name</span><b>{settings.storeName}</b></div>
         </article>
       </section>
+      <AccountCard />
     </>
+  )
+}
+
+function AccountCard() {
+  const { snapshot, notify } = useDashboard()
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newEmail, setNewEmail] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    if (saving) return
+    const email = newEmail.trim()
+    if (currentPassword.length < 8) return notify('Enter your current password')
+    if (!email && !newPassword) return notify('Enter a new email or a new password')
+    if (email && !/^\S+@\S+\.\S+$/.test(email)) return notify('Enter a valid email')
+    if (newPassword) {
+      if (newPassword.length < 8) return notify('New password must be at least 8 characters')
+      if (newPassword !== confirm) return notify('New passwords do not match')
+    }
+    setSaving(true)
+    try {
+      await apiFetch('/auth/change-credentials', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newEmail: email || undefined, newPassword: newPassword || undefined }),
+      })
+      setCurrentPassword('')
+      setNewEmail('')
+      setNewPassword('')
+      setConfirm('')
+      notify('Saved. Please log out and sign in again with the new details.')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="card" style={{ marginTop: 16, maxWidth: 520 }}>
+      <h2>My account</h2>
+      <p className="sub">Signed in as {snapshot?.admin.email}. Change your email or password here.</p>
+      <label className="field">Current password
+        <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+      </label>
+      <label className="field">New email (optional)
+        <input type="email" value={newEmail} onChange={(event) => setNewEmail(event.target.value)} />
+      </label>
+      <label className="field">New password (optional)
+        <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+      </label>
+      <label className="field">Confirm new password
+        <input type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} />
+      </label>
+      <div className="modal-actions">
+        <button className="btn-dark" type="button" disabled={saving} onClick={() => { void save() }}>
+          {saving ? 'Saving…' : 'Save account'}
+        </button>
+      </div>
+    </section>
   )
 }

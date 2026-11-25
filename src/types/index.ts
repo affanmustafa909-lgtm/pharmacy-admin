@@ -5,6 +5,7 @@ export type PageId =
   | 'overview'
   | 'orders'
   | 'medicines'
+  | 'purchasing'
   | 'prescriptions'
   | 'customers'
   | 'pharmacies'

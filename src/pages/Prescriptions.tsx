@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext'
 import { formatWhen, rxLabel } from '../lib/format'
 import { API_BASE, apiFetch } from '../services/http'
@@ -10,21 +10,59 @@ type VerifiedLine = {
   approvedQty: string
 }
 
+type StatusFilter = 'all' | PrescriptionStatus
+
 const emptyLine = (): VerifiedLine => ({ productId: '', approvedQty: '1' })
+
+const FILTERS: { id: StatusFilter; label: string }[] = [
+  { id: 'pending', label: 'Pending' },
+  { id: 'needs_clearer_photo', label: 'Needs photo' },
+  { id: 'approved', label: 'Verified' },
+  { id: 'dispensed', label: 'Dispensed' },
+  { id: 'rejected', label: 'Rejected' },
+  { id: 'all', label: 'All' },
+]
 
 export function PrescriptionsPage() {
   const { snapshot, decidePrescription, activeStoreId, activeStore } = useDashboard()
-  const items = snapshot!.prescriptions.filter((item) => !activeStoreId || item.pharmacyId === activeStoreId)
-  const [selected, setSelected] = useState(items.find((item) => item.status === 'pending')?.id ?? items[0]?.id ?? '')
+  // Order staff can look at prescriptions but only pharmacists and managers decide on them.
+  const canDecide = snapshot!.admin.deskRole !== 'ORDER_STAFF'
+  const items = useMemo(
+    () => snapshot!.prescriptions.filter((item) => !activeStoreId || item.pharmacyId === activeStoreId),
+    [snapshot, activeStoreId],
+  )
+  const [filter, setFilter] = useState<StatusFilter>('pending')
   const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState('')
   const [notes, setNotes] = useState('')
   const [catalog, setCatalog] = useState<CatalogProduct[]>([])
   const [catalogQuery, setCatalogQuery] = useState('')
   const [lines, setLines] = useState<VerifiedLine[]>([emptyLine()])
-  const visible = items.filter((item) =>
-    `${item.id} ${item.customerName} ${item.medicineName} ${item.scannedText ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()),
-  )
-  const current = items.find((item) => item.id === selected) ?? visible[0]
+  const [busy, setBusy] = useState(false)
+  const [formError, setFormError] = useState('')
+
+  const counts = useMemo(() => {
+    const map: Record<string, number> = {}
+    items.forEach((item) => {
+      map[item.status] = (map[item.status] ?? 0) + 1
+    })
+    return map
+  }, [items])
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const list = items.filter((item) => {
+      if (filter !== 'all' && item.status !== filter) return false
+      if (!q) return true
+      return `${item.id} ${item.customerName} ${item.medicineName} ${item.scannedText ?? ''}`.toLowerCase().includes(q)
+    })
+    // Waiting prescriptions: oldest first, so nobody is left waiting. Everything else: newest first.
+    const oldestFirst = filter === 'pending' || filter === 'needs_clearer_photo'
+    return [...list].sort((a, b) => (oldestFirst ? a.submittedAt.localeCompare(b.submittedAt) : b.submittedAt.localeCompare(a.submittedAt)))
+  }, [items, filter, query])
+
+  const current = visible.find((item) => item.id === selected) ?? visible[0]
+  const currentId = current?.id
   const imageSrc = useMemo(() => {
     if (!current?.imageUrl) return ''
     if (current.imageUrl.startsWith('http')) return current.imageUrl
@@ -32,6 +70,23 @@ export function PrescriptionsPage() {
   }, [current?.imageUrl])
 
   const storeId = activeStoreId || current?.pharmacyId || ''
+  const isOpenCase = current?.status === 'pending' || current?.status === 'needs_clearer_photo'
+
+  // Whenever a different prescription is shown, start its form fresh.
+  useEffect(() => {
+    if (!current) return
+    setFormError('')
+    setCatalogQuery('')
+    setNotes('')
+    setLines(
+      current.verifiedItems?.length
+        ? current.verifiedItems.map((entry) => ({
+            productId: entry.productId ?? '',
+            approvedQty: String(entry.approvedQty ?? entry.quantity ?? '1'),
+          }))
+        : [emptyLine()],
+    )
+  }, [currentId])
 
   useEffect(() => {
     if (!storeId) return
@@ -82,30 +137,20 @@ export function PrescriptionsPage() {
     return catalog.filter((item) => `${item.name} ${item.sku} ${item.strength ?? ''}`.toLowerCase().includes(q)).slice(0, 80)
   }, [catalog, catalogQuery])
 
-  function hydrateLines(rxId: string) {
-    const item = items.find((entry) => entry.id === rxId)
-    if (!item) return
-    setSelected(rxId)
-    setNotes(item.notes || '')
-    if (item.verifiedItems?.length) {
-      setLines(
-        item.verifiedItems.map((entry) => ({
-          productId: entry.productId ?? catalog.find((product) => product.sku === entry.sku)?.id ?? '',
-          approvedQty: String(entry.approvedQty ?? entry.quantity ?? '1'),
-        })),
-      )
-      return
-    }
-    setLines([emptyLine()])
+  /** The list for one line. The medicine already picked stays in it even if the search hides it. */
+  function optionsFor(productId: string) {
+    if (!productId || filteredCatalog.some((entry) => entry.id === productId)) return filteredCatalog
+    const picked = catalog.find((entry) => entry.id === productId)
+    return picked ? [picked, ...filteredCatalog] : filteredCatalog
   }
 
   function buildVerifiedItems(): VerifiedRxItem[] {
-    const items: VerifiedRxItem[] = []
+    const result: VerifiedRxItem[] = []
     for (const line of lines) {
       const product = catalog.find((entry) => entry.id === line.productId)
       if (!product) continue
       const qty = line.approvedQty.trim() || '1'
-      items.push({
+      result.push({
         productId: product.id,
         sku: product.sku,
         name: product.name,
@@ -116,7 +161,65 @@ export function PrescriptionsPage() {
         approvedQty: Number(qty) || undefined,
       })
     }
-    return items
+    return result
+  }
+
+  function validate(status: PrescriptionStatus) {
+    if (status === 'rejected' && notes.trim().length < 3) {
+      return 'Write a short reason. The patient will see it.'
+    }
+    if (status === 'needs_clearer_photo' && notes.trim().length < 3) {
+      return 'Tell the patient what to fix in the photo, for example: the text is blurry.'
+    }
+    if (status === 'approved') {
+      const chosen = lines.filter((line) => line.productId)
+      if (chosen.length === 0) return 'Pick at least one medicine from the catalog.'
+      const seen = new Set<string>()
+      for (const line of chosen) {
+        const name = catalog.find((entry) => entry.id === line.productId)?.name ?? 'This medicine'
+        const qty = Number(line.approvedQty)
+        if (line.approvedQty.trim() === '' || !Number.isInteger(qty) || qty <= 0) {
+          return `${name}: approved quantity must be a whole number above 0.`
+        }
+        if (seen.has(line.productId)) return `${name} is added twice. Keep one line for each medicine.`
+        seen.add(line.productId)
+      }
+    }
+    return ''
+  }
+
+  async function decide(status: PrescriptionStatus) {
+    if (!current || busy || !canDecide) return
+    const problem = validate(status)
+    if (problem) {
+      setFormError(problem)
+      return
+    }
+    setFormError('')
+    if (status === 'approved') {
+      const short = lines
+        .filter((line) => line.productId)
+        .map((line) => ({ product: catalog.find((entry) => entry.id === line.productId), qty: Number(line.approvedQty) }))
+        .filter((entry) => entry.product && entry.qty > entry.product.stock)
+      if (short.length > 0) {
+        const names = short.map((entry) => entry.product!.name).join(', ')
+        if (!window.confirm(`Not enough stock for: ${names}. Verify anyway?`)) return
+      }
+    }
+    if (status === 'rejected' && !window.confirm('Reject this prescription? The patient will be told.')) return
+
+    setBusy(true)
+    try {
+      await decidePrescription(current.id, status, {
+        notes: notes.trim() || undefined,
+        // Dispense reuses the items that were already verified, so nothing is rebuilt by mistake.
+        verifiedItems: status === 'approved' ? buildVerifiedItems() : status === 'dispensed' ? current.verifiedItems : undefined,
+      })
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Could not save the decision. Please try again.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -131,6 +234,13 @@ export function PrescriptionsPage() {
           </p>
         </div>
       </div>
+      <div className="btn-row" style={{ marginBottom: 16 }}>
+        {FILTERS.map((item) => (
+          <button key={item.id} className={filter === item.id ? 'chip is-on' : 'chip'} type="button" onClick={() => setFilter(item.id)}>
+            {item.label} ({item.id === 'all' ? items.length : (counts[item.id] ?? 0)})
+          </button>
+        ))}
+      </div>
       <section className="rx-layout">
         <article className="card">
           <div className="table-head">
@@ -140,18 +250,22 @@ export function PrescriptionsPage() {
               <input placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
             </label>
           </div>
-          {visible.length === 0 ? <div className="empty">No prescriptions match.</div> : null}
+          {visible.length === 0 ? <div className="empty">No prescriptions here. Try another filter.</div> : null}
           {visible.map((item) => (
             <button
               key={item.id}
               className={current?.id === item.id ? 'list-btn is-on' : 'list-btn'}
               type="button"
-              onClick={() => hydrateLines(item.id)}
+              onClick={() => setSelected(item.id)}
             >
               <span>
                 <b>{item.customerName}</b>
                 <span className="mini">
                   {item.medicineName} · {item.quantity || 'Qty TBD'}
+                </span>
+                <span className="mini">
+                  {!activeStoreId ? `${item.pharmacyName} · ` : ''}
+                  {formatWhen(item.submittedAt)}
                 </span>
               </span>
               <span className="status">
@@ -165,16 +279,21 @@ export function PrescriptionsPage() {
           <article className="card">
             <p className="kicker">{current.id}</p>
             <h2>{current.medicineName || 'Awaiting verification'}</h2>
-            <p className="sub">{current.customerNote || current.notes || 'No patient note.'}</p>
+            <p className="sub">{current.customerNote || 'No patient note.'}</p>
             {imageSrc ? (
               <div className="rx-image-wrap">
                 <img src={imageSrc} alt="Prescription upload" className="rx-image" />
+                <p className="sub">
+                  <a href={imageSrc} target="_blank" rel="noreferrer">
+                    <ExternalLink size={14} /> Open the original photo
+                  </a>
+                </p>
               </div>
             ) : (
               <div className="empty">No prescription image uploaded.</div>
             )}
             <div className="profile-stat">
-              <span>Scanned text</span>
+              <span>Scanned text (from this same photo)</span>
               <b style={{ whiteSpace: 'pre-wrap', fontWeight: 500 }}>{current.scannedText || 'No scanned text yet.'}</b>
             </div>
             <div className="profile-stat">
@@ -197,6 +316,12 @@ export function PrescriptionsPage() {
               <span>Status</span>
               <b>{rxLabel(current.status)}</b>
             </div>
+            {current.notes ? (
+              <div className="profile-stat">
+                <span>Note on record</span>
+                <b style={{ whiteSpace: 'pre-wrap', fontWeight: 500 }}>{current.notes}</b>
+              </div>
+            ) : null}
             {current.verifiedItems && current.verifiedItems.length > 0 ? (
               <div className="mt">
                 <h3>Verified items</h3>
@@ -211,7 +336,12 @@ export function PrescriptionsPage() {
                 ))}
               </div>
             ) : null}
-            {(current.status === 'pending' || current.status === 'needs_clearer_photo') && (
+
+            {!canDecide ? (
+              <p className="sub mt">Your role can view prescriptions but cannot verify, reject or dispense them.</p>
+            ) : null}
+
+            {canDecide && isOpenCase ? (
               <>
                 <label className="field">
                   <span>Search catalog</span>
@@ -219,6 +349,8 @@ export function PrescriptionsPage() {
                 </label>
                 {lines.map((line, index) => {
                   const product = catalog.find((entry) => entry.id === line.productId)
+                  const qty = Number(line.approvedQty)
+                  const tooMany = Boolean(product) && Number.isInteger(qty) && qty > (product?.stock ?? 0)
                   return (
                     <div className="fee-row" key={`line-${index}`} style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
                       <label className="field" style={{ flex: 2 }}>
@@ -232,7 +364,7 @@ export function PrescriptionsPage() {
                           }}
                         >
                           <option value="">Select from catalog…</option>
-                          {filteredCatalog.map((entry) => (
+                          {optionsFor(line.productId).map((entry) => (
                             <option key={entry.id} value={entry.id}>
                               {entry.name}{entry.strength ? ` · ${entry.strength}` : ''} · {entry.unitLabel} ({entry.sku})
                             </option>
@@ -261,8 +393,9 @@ export function PrescriptionsPage() {
                         <Trash2 size={14} />
                       </button>
                       {product ? (
-                        <p className="sub" style={{ width: '100%' }}>
+                        <p className="sub" style={{ width: '100%', color: tooMany ? '#d92d20' : undefined }}>
                           {product.name} · {product.strength || '—'} · {product.unitLabel} · stock {product.stock}
+                          {tooMany ? ' · more than the stock on hand' : ''}
                         </p>
                       ) : null}
                     </div>
@@ -272,28 +405,31 @@ export function PrescriptionsPage() {
                   <Plus size={14} /> Add medicine line
                 </button>
                 <label className="field">
-                  <span>Pharmacist note</span>
+                  <span>Pharmacist note (required to reject or ask for a clearer photo; the patient sees it)</span>
                   <textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} />
                 </label>
               </>
-            )}
+            ) : null}
+
+            {formError ? <p style={{ color: '#d92d20' }}>{formError}</p> : null}
+
             <div className="modal-actions">
-              {current.status === 'pending' || current.status === 'needs_clearer_photo' ? (
+              {canDecide && isOpenCase ? (
                 <>
-                  <button className="btn-soft" type="button" onClick={() => void decide('rejected')}>
+                  <button className="btn-soft" type="button" disabled={busy} onClick={() => void decide('rejected')}>
                     Reject
                   </button>
-                  <button className="btn-soft" type="button" onClick={() => void decide('needs_clearer_photo')}>
+                  <button className="btn-soft" type="button" disabled={busy} onClick={() => void decide('needs_clearer_photo')}>
                     Request clearer photo
                   </button>
-                  <button className="btn-dark" type="button" onClick={() => void decide('approved')} disabled={buildVerifiedItems().length === 0}>
-                    Verify
+                  <button className="btn-dark" type="button" disabled={busy} onClick={() => void decide('approved')}>
+                    {busy ? 'Saving…' : 'Verify'}
                   </button>
                 </>
               ) : null}
-              {current.status === 'approved' ? (
-                <button className="btn-dark" type="button" onClick={() => void decide('dispensed')}>
-                  Dispense
+              {canDecide && current.status === 'approved' ? (
+                <button className="btn-dark" type="button" disabled={busy} onClick={() => void decide('dispensed')}>
+                  {busy ? 'Saving…' : 'Dispense'}
                 </button>
               ) : null}
               {current.status === 'dispensed' || current.status === 'rejected' ? (
@@ -305,12 +441,4 @@ export function PrescriptionsPage() {
       </section>
     </>
   )
-
-  function decide(status: PrescriptionStatus) {
-    if (!current) return
-    void decidePrescription(current.id, status, {
-      notes: notes.trim() || undefined,
-      verifiedItems: status === 'approved' || status === 'dispensed' ? buildVerifiedItems() : undefined,
-    })
-  }
 }

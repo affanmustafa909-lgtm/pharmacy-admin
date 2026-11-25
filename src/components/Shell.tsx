@@ -3,10 +3,12 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowLeft,
   BarChart3,
+  Boxes,
   Bell,
   ChevronDown,
   ClipboardList,
   Clock,
+  FileText,
   HeartPulse,
   LayoutGrid,
   LogOut,
@@ -30,6 +32,7 @@ import type { PageId } from '../types'
 import { AuditPage } from '../pages/Audit'
 import { CustomersPage } from '../pages/Customers'
 import { MedicinesPage } from '../pages/Medicines'
+import { PurchasingPage } from '../pages/Purchasing'
 import { MessagesPage } from '../pages/Messages'
 import { MobileAppPage } from '../pages/MobileApp'
 import { OrdersPage } from '../pages/Orders'
@@ -46,6 +49,7 @@ const PAGES: Record<PageId, () => ReactNode> = {
   overview: OverviewPage,
   orders: OrdersPage,
   medicines: MedicinesPage,
+  purchasing: PurchasingPage,
   prescriptions: PrescriptionsPage,
   customers: CustomersPage,
   pharmacies: PharmaciesPage,
@@ -63,6 +67,8 @@ const RAIL: { id: PageId; label: string; icon: typeof LayoutGrid }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutGrid },
   { id: 'orders', label: 'Orders', icon: ShoppingBag },
   { id: 'medicines', label: 'Medicines', icon: Pill },
+  { id: 'purchasing', label: 'Purchasing', icon: Boxes },
+  { id: 'prescriptions', label: 'Prescriptions', icon: FileText },
   { id: 'customers', label: 'Customers', icon: Users },
   { id: 'pharmacies', label: 'Stores', icon: MapPin },
   { id: 'parallel', label: 'Parallel', icon: Split },
@@ -78,6 +84,8 @@ const STORE_RAIL: { id: PageId; label: string; icon: typeof LayoutGrid }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutGrid },
   { id: 'orders', label: 'Orders', icon: ShoppingBag },
   { id: 'medicines', label: 'Products', icon: Pill },
+  { id: 'purchasing', label: 'Purchasing', icon: Boxes },
+  { id: 'prescriptions', label: 'Prescriptions', icon: FileText },
   { id: 'pharmacies', label: 'Delivery', icon: Truck },
   { id: 'team', label: 'Team & Access', icon: UserCog },
   { id: 'settings', label: 'Store', icon: Settings },

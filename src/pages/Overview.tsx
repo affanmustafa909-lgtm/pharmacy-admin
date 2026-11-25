@@ -7,20 +7,8 @@ import { OrderTable } from '../components/OrderTable'
 import { SalesChart } from '../components/SalesChart'
 import { useDashboard } from '../context/DashboardContext'
 import { deltaText, greeting, money } from '../lib/format'
+import { EXPIRY_SOON_DAYS, calendarDaysLeft, expiryLabel, expiryState, formatExpiry } from '../lib/expiry-Status'
 import type { OrderStatus } from '../types'
-
-function parseExpiry(value: string): Date | null {
-  const text = (value ?? '').trim()
-  if (!text) return null
-  let m = text.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/)
-  if (m) return m[3] ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(+m[1], +m[2], 0)
-  m = text.match(/^(\d{1,2})\/(\d{4})$/)
-  if (m) return new Date(+m[2], +m[1], 0)
-  m = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (m) return new Date(+m[3], +m[2] - 1, +m[1])
-  const d = new Date(text)
-  return Number.isNaN(d.getTime()) ? null : d
-}
 
 function Delta({ value, note }: { value: number; note: string }) {
   const up = value >= 0
@@ -48,17 +36,22 @@ export function OverviewPage() {
   const [medicineId, setMedicineId] = useState(scopedMeds[0]?.id ?? '')
   const [quantity, setQuantity] = useState('24')
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  // Same rule as the Medicines page: only medicines with stock, expired or within EXPIRY_SOON_DAYS.
   const expiryAlerts = scopedMeds
-    .map((item) => {
-      const date = parseExpiry(item.expiry)
-      if (!date) return null
-      const days = Math.ceil((date.getTime() - today.getTime()) / 86400000)
-      return { id: item.id, name: item.name, batch: item.batch, stock: item.stock, days }
-    })
-    .filter((row): row is NonNullable<typeof row> => row !== null && row.days <= 90)
-    .sort((a, b) => a.days - b.days)
+    .filter((item) => item.stock > 0)
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      batch: item.batch,
+      stock: item.stock,
+      expiry: item.expiry,
+      state: expiryState(item.expiry),
+      days: calendarDaysLeft(item.expiry),
+    }))
+    .filter((row) => row.state === 'expired' || row.state === 'soon')
+    .sort((a, b) => (a.days ?? 0) - (b.days ?? 0))
+  const expiredCount = expiryAlerts.filter((row) => row.state === 'expired').length
+  const soonCount = expiryAlerts.filter((row) => row.state === 'soon').length
 
   useEffect(() => {
     setStore(activeStoreId ?? 'all')
@@ -106,8 +99,12 @@ export function OverviewPage() {
             <div className="stat-value">{data.dashboardCounts.lowStock}</div>
           </article>
           <article className="card lift">
-            <div className="stat-top">Expiring batches</div>
-           <div className="stat-value">{expiryAlerts.length}</div>
+            <div className="stat-top">Expired</div>
+            <div className="stat-value">{expiredCount}</div>
+          </article>
+          <article className="card lift">
+            <div className="stat-top">Expiring ≤ {EXPIRY_SOON_DAYS} days</div>
+            <div className="stat-value">{soonCount}</div>
           </article>
           <article className="card lift">
             <div className="stat-top">Orders today</div>
@@ -118,22 +115,25 @@ export function OverviewPage() {
 
       <article className="card" style={{ marginBottom: 16 }}>
         <h2>Expiry alerts</h2>
-        <p className="sub">Batches expired or expiring within 90 days.</p>
+        <p className="sub">
+          Batches expired or expiring within {EXPIRY_SOON_DAYS} days. Store: {activeStore?.name ?? 'All stores'} · as of {new Date().toLocaleDateString()}
+        </p>
         {expiryAlerts.length === 0 ? (
           <div className="empty">No batches near expiry.</div>
         ) : (
           <div className="table-wrap table-static">
             <table>
-              <thead><tr><th>Medicine</th><th>Batch</th><th>Stock</th><th>Status</th></tr></thead>
+              <thead><tr><th>Medicine</th><th>Batch</th><th>Stock</th><th>Expiry</th><th>Status</th></tr></thead>
               <tbody>
                 {expiryAlerts.slice(0, 8).map((row) => (
                   <tr key={row.id}>
                     <td>{row.name}</td>
                     <td>{row.batch || '-'}</td>
                     <td>{row.stock}</td>
+                    <td>{formatExpiry(row.expiry)}</td>
                     <td>
-                      <span className={row.days < 0 ? 'tag off' : 'tag on'}>
-                        {row.days < 0 ? `Expired ${-row.days}d ago` : `${row.days} days left`}
+                      <span className={row.state === 'expired' ? 'tag off' : 'tag on'}>
+                        {expiryLabel(row.expiry)}
                       </span>
                     </td>
                   </tr>
