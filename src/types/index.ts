@@ -4,6 +4,7 @@
 export type PageId =
   | 'overview'
   | 'orders'
+  | 'payments'
   | 'medicines'
   | 'purchasing'
   | 'prescriptions'
@@ -31,7 +32,12 @@ export type MobileConfig = {
   heroBold: string
   quickActions: { id: string; label: string; icon: string; href: string }[]
   deliveryOptions: { id: 'standard' | 'express'; title: string; eta: string; priceLabel: string; highlighted?: boolean }[]
-  paymentMethods: { id: string; type: 'apple_pay' | 'card' | 'other'; label: string; detail?: string }[]
+  paymentMethods: {
+    id: string
+    type: 'apple_pay' | 'card' | 'debit_card' | 'credit_card' | 'cod' | 'other'
+    label: string
+    detail?: string
+  }[]
   aiMessages: { id: string; role: 'assistant' | 'user'; text: string }[]
   tracking: {
     riderName: string
@@ -176,6 +182,11 @@ export interface AdminOrder {
   deliveryType?: string
   deliveryDistanceKm?: number | null
   paymentLabel?: string
+  transactionId?: string | null
+  paymentMethod?: string | null
+  cardLast4?: string | null
+  cardBrand?: string | null
+  paidAt?: string | null
   addressLine?: string
   prescriptionNumber?: string
   createdAt: string

@@ -85,7 +85,28 @@ export function OrderDetail({ order, onClose }: { order: AdminOrder | null; onCl
                   {order.deliveryDistanceKm != null ? ` · ${order.deliveryDistanceKm.toFixed(1)} km` : ''}
                 </b>
               </div>
-              <div className="profile-stat"><span>Payment</span><b>{order.paymentLabel || order.paymentStatus || '—'}</b></div>
+              <div className="profile-stat">
+                <span>Payment</span>
+                <b>
+                  {order.paymentLabel || order.paymentStatus || '—'}
+                  {order.paymentStatus ? ` · ${order.paymentStatus}` : ''}
+                </b>
+              </div>
+              {order.transactionId ? (
+                <div className="profile-stat"><span>Transaction</span><b>{order.transactionId}</b></div>
+              ) : null}
+              {order.cardBrand || order.cardLast4 ? (
+                <div className="profile-stat">
+                  <span>Card</span>
+                  <b>
+                    {order.cardBrand || 'Card'}
+                    {order.cardLast4 ? ` •••• ${order.cardLast4}` : ''}
+                  </b>
+                </div>
+              ) : null}
+              {order.paidAt ? (
+                <div className="profile-stat"><span>Paid at</span><b>{formatWhen(order.paidAt)}</b></div>
+              ) : null}
               <div className="profile-stat"><span>Address</span><b className="detail-wrap">{order.addressLine || '—'}</b></div>
               {order.prescriptionNumber ? (
                 <div className="profile-stat"><span>Prescription</span><b>{order.prescriptionNumber}</b></div>

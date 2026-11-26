@@ -3,6 +3,7 @@ import type { PageId } from './types'
 export const TOP_NAV: { id: PageId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'orders', label: 'Orders' },
+  { id: 'payments', label: 'Payments' },
   { id: 'medicines', label: 'Medicines' },
   { id: 'purchasing', label: 'Purchasing' },
   { id: 'prescriptions', label: 'Photo Requests' },
@@ -24,6 +25,7 @@ export const STORE_TOP_NAV: { id: PageId; label: string }[] = [
 export const PAGE_IDS: PageId[] = [
   'overview',
   'orders',
+  'payments',
   'medicines',
   'purchasing',
   'prescriptions',

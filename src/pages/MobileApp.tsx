@@ -21,8 +21,9 @@ const FALLBACK_CONFIG: MobileConfig = {
     { id: 'express', title: 'Express', eta: '20-30 min', priceLabel: 'From charges', highlighted: true },
   ],
   paymentMethods: [
-    { id: 'apple', type: 'apple_pay', label: 'Apple Pay' },
-    { id: 'visa', type: 'card', label: 'Visa', detail: 'Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢ 4829' },
+    { id: 'cod', type: 'cod', label: 'Cash on Delivery' },
+    { id: 'debit', type: 'debit_card', label: 'Debit Card', detail: 'TEST MODE' },
+    { id: 'credit', type: 'credit_card', label: 'Credit Card', detail: 'TEST MODE' },
   ],
   aiMessages: [
     { id: 'm1', role: 'assistant', text: 'Hi Ã¢â‚¬â€ IÃ¢â‚¬â„¢m Hera AI. Ask me about medicines, side effects, or what to take for common symptoms.' },

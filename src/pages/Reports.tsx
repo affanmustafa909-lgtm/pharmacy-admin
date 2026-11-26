@@ -162,7 +162,9 @@ export function ReportsPage() {
       <div className="page-head">
         <div>
           <h1>Reports</h1>
-          <p className="sub">Chain performance, stock value, and settlement history.</p>
+          <p className="sub">
+            Chain performance, stock value, and settlement history. Card simulation attempts also appear under Payments.
+          </p>
         </div>
         <button className="btn-dark" type="button" disabled={exporting} onClick={() => void exportWorkbook()}>
           <Download size={16} /> {exporting ? 'Exporting…' : 'Export Excel'}
@@ -261,6 +263,7 @@ export function ReportsPage() {
             <select value={recordType} onChange={(event) => setRecordType(event.target.value)}>
               <option value="all">All records</option>
               <option value="order">Orders</option>
+              <option value="payment">Card payments</option>
               <option value="charge">Charges</option>
               <option value="prescription">Prescriptions</option>
               <option value="product">Products</option>
@@ -277,6 +280,8 @@ export function ReportsPage() {
               <option value="out_for_delivery">Out for delivery</option>
               <option value="delivered">Delivered</option>
               <option value="cancelled">Cancelled</option>
+              <option value="succeeded">Payment succeeded</option>
+              <option value="failed">Payment failed</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="active">Active</option>

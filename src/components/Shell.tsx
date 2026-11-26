@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  CreditCard,
   ShoppingBag,
   Smartphone,
   Sun,
@@ -39,6 +40,7 @@ import { MobileAppPage } from '../pages/MobileApp'
 import { OrdersPage } from '../pages/Orders'
 import { OverviewPage } from '../pages/Overview'
 import { ParallelPage } from '../pages/Parallel'
+import { PaymentsPage } from '../pages/Payments'
 import { PharmaciesPage } from '../pages/Pharmacies'
 import { PrescriptionsPage } from '../pages/Prescriptions'
 import { RemindersPage } from '../pages/Reminders'
@@ -49,6 +51,7 @@ import { TeamAccessPage } from '../pages/TeamAccess'
 const PAGES: Record<PageId, () => ReactNode> = {
   overview: OverviewPage,
   orders: OrdersPage,
+  payments: PaymentsPage,
   medicines: MedicinesPage,
   purchasing: PurchasingPage,
   prescriptions: PrescriptionsPage,
@@ -67,6 +70,7 @@ const PAGES: Record<PageId, () => ReactNode> = {
 const RAIL: { id: PageId; label: string; icon: typeof LayoutGrid }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutGrid },
   { id: 'orders', label: 'Orders', icon: ShoppingBag },
+  { id: 'payments', label: 'Payments', icon: CreditCard },
   { id: 'medicines', label: 'Medicines', icon: Pill },
   { id: 'purchasing', label: 'Purchasing', icon: Boxes },
   { id: 'prescriptions', label: 'Photo Requests', icon: FileText },

@@ -170,7 +170,7 @@ export function CustomerApp() {
   const [cart, setCart] = useState<CartLine[]>([])
   const [search, setSearch] = useState('')
   const [deliveryType, setDeliveryType] = useState<'standard' | 'express' | 'pickup'>('standard')
-  const [paymentLabel, setPaymentLabel] = useState('Cash on delivery')
+  const [paymentLabel, setPaymentLabel] = useState('Cash on Delivery')
   const [address, setAddress] = useState('')
   const [quote, setQuote] = useState<Quote | null>(null)
   const [loading, setLoading] = useState(true)
@@ -178,6 +178,15 @@ export function CustomerApp() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
+  const [cardOpen, setCardOpen] = useState(false)
+  const [cardPhase, setCardPhase] = useState<'form' | 'processing' | 'success' | 'failed'>('form')
+  const [cardholderName, setCardholderName] = useState('')
+  const [cardNumber, setCardNumber] = useState('')
+  const [cardExpiry, setCardExpiry] = useState('')
+  const [cardCvv, setCardCvv] = useState('')
+  const [cardError, setCardError] = useState('')
+  const [cardTxn, setCardTxn] = useState<{ id: string; transactionId: string; amount: number } | null>(null)
+  const [payIdempotency, setPayIdempotency] = useState(() => `webpay_${Date.now()}`)
 
   // Prescriptions
   const [rxList, setRxList] = useState<MyPrescription[]>([])
@@ -289,12 +298,55 @@ export function CustomerApp() {
     setCart(prev => prev.map(l => (l.product.id === id ? { ...l, quantity: l.quantity + delta } : l)).filter(l => l.quantity > 0))
   }
 
-  async function placeOrder() {
-    if (cart.length === 0) return
-    if (deliveryType !== 'pickup' && !address.trim()) {
-      setError('Please enter a delivery address')
+  const isCardPayment = /debit card|credit card/i.test(paymentLabel)
+  const cardMethod = /credit/i.test(paymentLabel) ? 'credit_card' : 'debit_card'
+
+  function openCardPay() {
+    setCardOpen(true)
+    setCardPhase('form')
+    setCardError('')
+    setCardTxn(null)
+    setPayIdempotency(`webpay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`)
+  }
+
+  async function simulateAndPlace() {
+    const amount = quote?.total ?? cartTotal
+    if (!cardholderName.trim() || cardNumber.replace(/\D/g, '').length < 13 || !/^\d{2}\/\d{2}$/.test(cardExpiry.trim()) || cardCvv.replace(/\D/g, '').length < 3) {
+      setCardError('Enter valid cardholder name, number, expiry (MM/YY), and CVV')
       return
     }
+    setCardPhase('processing')
+    setCardError('')
+    try {
+      const payment = await customerFetch('/payments/simulate', {
+        method: 'POST',
+        body: JSON.stringify({
+          amount,
+          method: cardMethod,
+          cardholderName: cardholderName.trim(),
+          cardNumber,
+          expiry: cardExpiry.trim(),
+          cvv: cardCvv,
+          idempotencyKey: payIdempotency,
+        }),
+      })
+      if (payment.status !== 'succeeded') {
+        setCardPhase('failed')
+        setCardError(payment.failureMessage || 'Payment failed')
+        setPayIdempotency(`webpay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`)
+        return
+      }
+      setCardTxn({ id: payment.id, transactionId: payment.transactionId, amount: payment.amount })
+      setCardPhase('success')
+      await placeOrderWithPayment(payment.id, payment.transactionId)
+    } catch (err) {
+      setCardPhase('failed')
+      setCardError(err instanceof Error ? err.message : 'Payment could not be processed')
+      setPayIdempotency(`webpay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`)
+    }
+  }
+
+  async function placeOrderWithPayment(paymentTransactionId?: string, transactionId?: string) {
     setError('')
     setPlacing(true)
     try {
@@ -304,21 +356,45 @@ export function CustomerApp() {
           storeId,
           deliveryType,
           paymentLabel,
+          paymentStatus:
+            paymentTransactionId || !/cash on delivery|^cod$/i.test(paymentLabel)
+              ? 'paid'
+              : 'unpaid',
+          paymentTransactionId,
           addressLine: deliveryType === 'pickup' ? '' : address.trim(),
           items: cart.map(l => ({ productId: l.product.id, quantity: l.quantity })),
         }),
       })
       setCart([])
       setAddress('')
-      setNotice(`Order ${result.id} placed successfully!`)
+      setCardOpen(false)
+      setNotice(
+        transactionId || result.transactionId
+          ? `Order ${result.id} paid · ${transactionId || result.transactionId}`
+          : `Order ${result.id} placed successfully!`,
+      )
       await loadOrders()
       setRefreshKey(k => k + 1)
       setTab('orders')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not place order')
+      if (paymentTransactionId) setCardError(err instanceof Error ? err.message : 'Order could not be confirmed after payment')
     } finally {
       setPlacing(false)
     }
+  }
+
+  async function placeOrder() {
+    if (cart.length === 0) return
+    if (deliveryType !== 'pickup' && !address.trim()) {
+      setError('Please enter a delivery address')
+      return
+    }
+    if (isCardPayment) {
+      openCardPay()
+      return
+    }
+    await placeOrderWithPayment()
   }
 
   async function cancelOrder(id: string) {
@@ -501,9 +577,9 @@ export function CustomerApp() {
                 <label>
                   Payment{' '}
                   <select value={paymentLabel} onChange={e => setPaymentLabel(e.target.value)}>
-                    <option>Cash on delivery</option>
-                    <option>Card</option>
-                    <option>Wallet</option>
+                    <option>Cash on Delivery</option>
+                    <option>Debit Card</option>
+                    <option>Credit Card</option>
                   </select>
                 </label>
               </p>
@@ -521,9 +597,54 @@ export function CustomerApp() {
               ) : (
                 <p><strong>Subtotal: ${cartTotal.toFixed(2)}</strong></p>
               )}
-              <button onClick={placeOrder} disabled={placing} style={green}>
-                {placing ? 'Placing order...' : 'Place Order'}
+              <button onClick={() => void placeOrder()} disabled={placing} style={green}>
+                {placing ? 'Placing order...' : isCardPayment ? 'Pay with card' : 'Place Order'}
               </button>
+            </div>
+          )}
+
+          {cardOpen && (
+            <div style={{ ...card, border: '2px solid #1f7a4d' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0 }}>Card payment · TEST MODE</h3>
+                <button type="button" style={btn} onClick={() => setCardOpen(false)}>Close</button>
+              </div>
+              <p style={{ color: '#9a6700', fontWeight: 700 }}>No real money is charged. Use test cards only.</p>
+              {cardPhase === 'form' || cardPhase === 'failed' ? (
+                <>
+                  <p><strong>Total: ${(quote?.total ?? cartTotal).toFixed(2)}</strong></p>
+                  <label style={{ display: 'block', marginTop: 8 }}>Cardholder Name
+                    <input value={cardholderName} onChange={e => setCardholderName(e.target.value)} style={{ width: '100%', padding: 10, marginTop: 4 }} />
+                  </label>
+                  <label style={{ display: 'block', marginTop: 8 }}>Card Number
+                    <input value={cardNumber} onChange={e => setCardNumber(e.target.value)} placeholder="4111 1111 1111 1111" style={{ width: '100%', padding: 10, marginTop: 4 }} />
+                  </label>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                    <label style={{ flex: 1 }}>Expiry (MM/YY)
+                      <input value={cardExpiry} onChange={e => setCardExpiry(e.target.value)} placeholder="12/30" style={{ width: '100%', padding: 10, marginTop: 4 }} />
+                    </label>
+                    <label style={{ flex: 1 }}>CVV
+                      <input value={cardCvv} onChange={e => setCardCvv(e.target.value)} placeholder="123" style={{ width: '100%', padding: 10, marginTop: 4 }} />
+                    </label>
+                  </div>
+                  <p style={{ fontSize: 13, color: '#555' }}>
+                    Success: 4111111111111111 · Decline: 4000000000000002 · Expiry 12/30 · CVV 123
+                  </p>
+                  {cardError ? <p style={{ color: '#b42318' }}>{cardError}</p> : null}
+                  <button type="button" style={green} disabled={placing} onClick={() => void simulateAndPlace()}>
+                    {cardPhase === 'failed' ? 'Retry payment' : 'Pay Now'}
+                  </button>
+                </>
+              ) : null}
+              {cardPhase === 'processing' ? <p>Processing payment…</p> : null}
+              {cardPhase === 'success' ? (
+                <div>
+                  <p style={{ color: '#1f7a4d', fontWeight: 700 }}>Payment Successful</p>
+                  {cardTxn ? <p>Transaction {cardTxn.transactionId} · ${cardTxn.amount.toFixed(2)}</p> : null}
+                  {placing ? <p>Confirming order…</p> : null}
+                  {cardError ? <p style={{ color: '#b42318' }}>{cardError}</p> : null}
+                </div>
+              ) : null}
             </div>
           )}
         </section>
