@@ -123,11 +123,11 @@ export function PrescriptionsPage() {
     <>
       <div className="page-head">
         <div>
-          <h1>Prescriptions</h1>
+          <h1>Photo Requests</h1>
           <p className="sub">
             {activeStore
-              ? `${activeStore.name}${activeStore.code ? ` (${activeStore.code})` : ''} — pick catalog products and approved qty before verifying.`
-              : 'Review uploads from the mobile app before the pharmacy dispenses them.'}
+              ? `${activeStore.name}${activeStore.code ? ` (${activeStore.code})` : ''} — open the submitted photo, link a catalog product, and reply with availability.`
+              : 'Medicine packaging and prescription uploads from the mobile app. Catalog creation stays under Medicines.'}
           </p>
         </div>
       </div>
@@ -163,16 +163,31 @@ export function PrescriptionsPage() {
         </article>
         {current ? (
           <article className="card">
-            <p className="kicker">{current.id}</p>
+            <p className="kicker">
+              {current.id} · {current.uploadType === 'medicine_packaging' ? 'Medicine packaging' : 'Prescription'}
+            </p>
             <h2>{current.medicineName || 'Awaiting verification'}</h2>
             <p className="sub">{current.customerNote || current.notes || 'No patient note.'}</p>
             {imageSrc ? (
               <div className="rx-image-wrap">
-                <img src={imageSrc} alt="Prescription upload" className="rx-image" />
+                <a href={imageSrc} target="_blank" rel="noreferrer" title="Open full-size photo">
+                  <img src={imageSrc} alt="Customer photo upload" className="rx-image" />
+                </a>
+                <p className="mini">Tap image to zoom / open original</p>
               </div>
             ) : (
-              <div className="empty">No prescription image uploaded.</div>
+              <div className="empty">No photo uploaded.</div>
             )}
+            {current.detectedDetails?.name ? (
+              <div className="profile-stat">
+                <span>Detected details</span>
+                <b>
+                  {[current.detectedDetails.name, current.detectedDetails.strength, current.detectedDetails.form, current.detectedDetails.packSize]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </b>
+              </div>
+            ) : null}
             <div className="profile-stat">
               <span>Scanned text</span>
               <b style={{ whiteSpace: 'pre-wrap', fontWeight: 500 }}>{current.scannedText || 'No scanned text yet.'}</b>
@@ -281,13 +296,13 @@ export function PrescriptionsPage() {
               {current.status === 'pending' || current.status === 'needs_clearer_photo' ? (
                 <>
                   <button className="btn-soft" type="button" onClick={() => void decide('rejected')}>
-                    Reject
+                    Mark unavailable
                   </button>
                   <button className="btn-soft" type="button" onClick={() => void decide('needs_clearer_photo')}>
                     Request clearer photo
                   </button>
                   <button className="btn-dark" type="button" onClick={() => void decide('approved')} disabled={buildVerifiedItems().length === 0}>
-                    Verify
+                    Link product · Available
                   </button>
                 </>
               ) : null}

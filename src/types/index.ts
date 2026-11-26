@@ -239,13 +239,28 @@ export interface Prescription {
   pharmacyId: string
   pharmacyName: string
   status: PrescriptionStatus
+  uploadType?: 'medicine_packaging' | 'prescription' | string
   quantity: string
   submittedAt: string
+  updatedAt?: string
   notes: string
   imageUrl?: string
+  imageReadable?: boolean
   scannedText?: string
+  detectedDetails?: {
+    name?: string
+    strength?: string
+    form?: string
+    packSize?: string
+    confidence?: number
+    unclear?: boolean
+  }
+  linkedProductId?: string | null
   verifiedItems?: VerifiedRxItem[]
   customerNote?: string
+  reviewer?: string
+  reviewedAt?: string | null
+  orderNumber?: string | null
 }
 
 export interface CustomerAddressSummary {

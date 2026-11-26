@@ -4,6 +4,7 @@ export const TOP_NAV: { id: PageId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'orders', label: 'Orders' },
   { id: 'medicines', label: 'Medicines' },
+  { id: 'prescriptions', label: 'Photo Requests' },
   { id: 'pharmacies', label: 'Stores' },
   { id: 'customers', label: 'Customers' },
   { id: 'reports', label: 'Reports' },
@@ -14,6 +15,7 @@ export const STORE_TOP_NAV: { id: PageId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'orders', label: 'Orders' },
   { id: 'medicines', label: 'Products' },
+  { id: 'prescriptions', label: 'Photo Requests' },
   { id: 'pharmacies', label: 'Delivery' },
   { id: 'settings', label: 'Store' },
 ]
@@ -37,7 +39,6 @@ export const PAGE_IDS: PageId[] = [
 
 export function pageFromHash(hash = window.location.hash): PageId {
   const id = hash.replace('#', '').split('?')[0] as PageId
-  if (id === 'prescriptions') return 'overview'
   return PAGE_IDS.includes(id) ? id : 'overview'
 }
 

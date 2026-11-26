@@ -94,11 +94,11 @@ export function deskRoleLabel(role: string) {
 
 export function rxLabel(status: PrescriptionStatus) {
   const labels: Record<PrescriptionStatus, string> = {
-    pending: 'Pending review',
-    needs_clearer_photo: 'Clearer photo needed',
-    approved: 'Verified',
-    dispensed: 'Dispensed',
-    rejected: 'Rejected',
+    pending: 'Pending Review',
+    needs_clearer_photo: 'Needs Clearer Photo',
+    approved: 'Available',
+    dispensed: 'Resolved',
+    rejected: 'Unavailable',
   }
   return labels[status]
 }
