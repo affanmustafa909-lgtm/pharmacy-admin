@@ -132,6 +132,42 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     return next
   }, [api])
 
+  // Live auto-refresh so new orders placed from the mobile app appear automatically
+  useEffect(() => {
+    if (!signedIn) return
+    let busy = false
+
+    const syncNow = () => {
+      if (busy || document.visibilityState === 'hidden') return
+      busy = true
+      api
+        .getSnapshot()
+        .then((next) => {
+          setSnapshot(next)
+          setError('')
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          busy = false
+        })
+    }
+
+    const interval = window.setInterval(syncNow, 4000)
+    const onFocus = () => syncNow()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') syncNow()
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [api, signedIn])
+
   useEffect(() => {
     if (!signedIn) {
       setLoading(false)
@@ -199,14 +235,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setPage(next)
     const hash = buildHash(next, search, activeStoreId ?? '')
     if (window.location.hash !== hash) history.pushState(null, '', hash)
-  }, [activeStoreId])
+    void reload().catch(() => undefined)
+  }, [activeStoreId, reload])
 
   const openStore = useCallback((id: string, nextPage: PageId = 'overview') => {
     setActiveStoreId(id)
     setPage(nextPage)
     const hash = buildHash(nextPage, '', id)
     if (window.location.hash !== hash) history.pushState(null, '', hash)
-  }, [])
+    void reload().catch(() => undefined)
+  }, [reload])
 
   const exitStore = useCallback(() => {
     setActiveStoreId(null)

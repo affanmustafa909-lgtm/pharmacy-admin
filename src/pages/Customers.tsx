@@ -1,18 +1,132 @@
-import { useState } from 'react'
+﻿import { useEffect, useState } from 'react'
+import { Modal } from '../components/Modal'
 import { useDashboard } from '../context/DashboardContext'
-import { hashQuery } from '../nav'
 import { money } from '../lib/format'
+import { hashQuery } from '../nav'
+import { apiFetch } from '../services/http'
 
+type CustomerActivity = {
+  id: string
+  action: string
+  detail: string
+  createdAt: string
+  storeId?: string | null
+  meta?: Record<string, unknown> | null
+  store?: {
+    id: string
+    code: string
+    name: string
+    city: string
+  } | null
+}
 export function CustomersPage() {
-  const { snapshot, go } = useDashboard()
+  const { snapshot, go, reload, notify } = useDashboard()
   const customers = snapshot!.customers
   const preset = hashQuery('customer')
   const [selected, setSelected] = useState(preset || customers[0]?.id || '')
   const [query, setQuery] = useState('')
-  const visible = customers.filter((customer) => `${customer.name} ${customer.email} ${customer.city}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const [editOpen, setEditOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    city: '',
+    dateOfBirth: '',
+    gender: '',
+    allergies: '',
+  })
+
+  const visible = customers.filter((customer) =>
+    `${customer.name} ${customer.email} ${customer.phone} ${customer.city}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
+  )
   const current = customers.find((customer) => customer.id === selected) ?? visible[0]
   const orders = snapshot!.orders.filter((order) => order.customerId === current?.id)
   const thread = snapshot!.threads.find((item) => item.customerId === current?.id)
+
+  const [activities, setActivities] = useState<CustomerActivity[]>([])
+  const [activityLoading, setActivityLoading] = useState(false)
+  const [activityError, setActivityError] = useState('')
+
+  useEffect(() => {
+    let active = true
+
+    async function loadActivities() {
+      if (!current?.id) {
+        setActivities([])
+        return
+      }
+
+      setActivityLoading(true)
+      setActivityError('')
+
+      try {
+        const result = await apiFetch(
+          `/admin/customers/${encodeURIComponent(current.id)}/activities`,
+        ) as { activities?: CustomerActivity[] }
+
+        if (active) setActivities(result.activities ?? [])
+      } catch (error) {
+        if (active) {
+          setActivityError(error instanceof Error ? error.message : 'Could not load activities')
+          setActivities([])
+        }
+      } finally {
+        if (active) setActivityLoading(false)
+      }
+    }
+
+    void loadActivities()
+
+    return () => {
+      active = false
+    }
+  }, [current?.id])
+  function openEdit() {
+    if (!current) return
+    setForm({
+      name: current.name,
+      email: current.email,
+      phone: current.phone,
+      city: current.city,
+      dateOfBirth: current.dateOfBirth ?? '',
+      gender: current.gender ?? '',
+      allergies: current.allergies ?? '',
+    })
+    setEditOpen(true)
+  }
+
+  async function saveEdit() {
+    if (!current) return
+    if (!form.name.trim() || !form.email.trim()) {
+      notify('Name and email are required')
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch(`/admin/customers/${encodeURIComponent(current.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: form.name.trim(),
+          email: form.email.trim(),
+          phone: form.phone.trim(),
+          city: form.city.trim(),
+          dateOfBirth: form.dateOfBirth.trim(),
+          gender: form.gender.trim(),
+          allergies: form.allergies.trim(),
+        }),
+      })
+      await reload()
+      setEditOpen(false)
+      notify('Customer account updated')
+    } catch (error: unknown) {
+      notify(error instanceof Error ? error.message : 'Could not update customer')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <>
@@ -34,16 +148,25 @@ export function CustomersPage() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Name</th><th>City</th><th>Orders</th><th>Spend</th><th>Status</th></tr>
+                <tr><th>Customer</th><th>Phone</th><th>City</th><th>Orders</th><th>Spend</th><th>Joined</th><th>Last Login</th></tr>
               </thead>
               <tbody>
                 {visible.map((customer) => (
-                  <tr key={customer.id} onClick={() => setSelected(customer.id)}>
-                    <td className="id-cell">{customer.name}</td>
-                    <td>{customer.city}</td>
+                  <tr
+                    key={customer.id}
+                    className={customer.id === current?.id ? 'is-selected' : ''}
+                    onClick={() => setSelected(customer.id)}
+                  >
+                    <td className="id-cell">
+                      <div>{customer.name}</div>
+                      <div className="mini">{customer.email}</div>
+                    </td>
+                    <td>{customer.phone || 'â€”'}</td>
+                    <td>{customer.city || 'â€”'}</td>
                     <td>{customer.orders}</td>
                     <td>{money(customer.spend)}</td>
-                    <td><span className="status"><i className={`dot ${customer.status}`} />{customer.status === 'active' ? 'Active' : 'Inactive'}</span></td>
+                    <td><span className="mini">{customer.since}</span></td>
+                    <td><span className="mini">{customer.lastLogin ? new Date(customer.lastLogin).toLocaleString() : "Never"}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -53,20 +176,154 @@ export function CustomersPage() {
         </article>
         {current ? (
           <article className="card">
-            <div className="avatar lg">{current.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</div>
+            <div className="avatar lg">
+              {current.name
+                .split(/\s+/)
+                .map((part) => part[0])
+                .slice(0, 2)
+                .join('')
+                .toUpperCase()}
+            </div>
             <h2 className="mt">{current.name}</h2>
             <p className="sub">{current.email}</p>
-            <div className="profile-stat"><span>Phone</span><b>{current.phone}</b></div>
-            <div className="profile-stat"><span>City</span><b>{current.city}</b></div>
+            <div className="profile-stat"><span>Phone</span><b>{current.phone || 'â€”'}</b></div>
+            <div className="profile-stat"><span>City</span><b>{current.city || 'â€”'}</b></div>
+            {current.dateOfBirth ? (
+              <div className="profile-stat"><span>Date of birth</span><b>{current.dateOfBirth}</b></div>
+            ) : null}
+            {current.gender ? (
+              <div className="profile-stat"><span>Gender</span><b>{current.gender}</b></div>
+            ) : null}
+            {current.allergies ? (
+              <div className="profile-stat"><span>Allergies / notes</span><b>{current.allergies}</b></div>
+            ) : null}
+            {current.addresses && current.addresses.length > 0 ? (
+              <div className="profile-stat">
+                <span>Delivery places ({current.addresses.length})</span>
+                <b className="detail-wrap">
+                  {current.addresses
+                    .map((a) => `${a.label}: ${[a.street, a.subCity, a.city, a.country].filter(Boolean).join(', ') || a.line}`)
+                    .join(' Â· ')}
+                </b>
+              </div>
+            ) : null}
+                        <div className="profile-stat"><span>Customer ID</span><b>{current.id}</b></div>
             <div className="profile-stat"><span>Customer since</span><b>{current.since}</b></div>
+            <div className="profile-stat"><span>Last login</span><b>{current.lastLogin ? new Date(current.lastLogin).toLocaleString() : "Never logged in"}</b></div>
             <div className="profile-stat"><span>Orders</span><b>{orders.length} in this view</b></div>
+            <div className="profile-stat">
+              <span>Customer activity history</span>
+              <b>{activities.length} recorded activities</b>
+            </div>
+            <div className="activity-timeline">
+              {activityLoading ? <p className="mini">Loading activities...</p> : null}
+              {activityError ? <p className="mini">{activityError}</p> : null}
+              {!activityLoading && !activityError && activities.length === 0 ? (
+                <p className="mini">No activities recorded yet.</p>
+              ) : null}
+              {activities.map((activity) => (
+                <div key={activity.id} className="profile-stat">
+                  <span>
+                    {activity.action === 'customer.registered'
+                      ? 'Account registered'
+                      : activity.action === 'customer.login'
+                        ? 'Customer login'
+                        : activity.action === 'customer.store_selected'
+                          ? 'Pharmacy selected'
+                          : activity.action === 'customer.profile_updated'
+                            ? 'Profile updated'
+                            : activity.action}
+                  </span>
+                  <b>{activity.detail || 'Activity recorded'}</b>
+                  {activity.store ? (
+                    <span className="mini">
+                      Pharmacy: {activity.store.name} ({activity.store.code})
+                      {activity.store.city ? ` · ${activity.store.city}` : ''}
+                    </span>
+                  ) : activity.action === 'customer.store_selected' ? (
+                    <span className="mini">Pharmacy details unavailable</span>
+                  ) : null}
+                  <span className="mini">
+                    {new Date(activity.createdAt).toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
             <div className="modal-actions">
+              <button className="btn-soft" type="button" onClick={openEdit}>Edit account</button>
               <button className="btn-soft" type="button" onClick={() => go('orders', `customer=${current.id}`)}>View orders</button>
               <button className="btn-dark" type="button" disabled={!thread} onClick={() => thread && go('messages', `thread=${thread.id}`)}>Message</button>
             </div>
           </article>
         ) : null}
       </section>
+
+      <Modal open={editOpen} title="Edit customer account" onClose={() => setEditOpen(false)}>
+        <label className="field">
+          Full name
+          <input
+            value={form.name}
+            onChange={(event) => setForm({ ...form, name: event.target.value })}
+          />
+        </label>
+        <label className="field">
+          Email address
+          <input
+            type="email"
+            value={form.email}
+            onChange={(event) => setForm({ ...form, email: event.target.value })}
+          />
+        </label>
+        <div className="split-2">
+          <label className="field">
+            Phone
+            <input
+              value={form.phone}
+              onChange={(event) => setForm({ ...form, phone: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            City
+            <input
+              value={form.city}
+              onChange={(event) => setForm({ ...form, city: event.target.value })}
+            />
+          </label>
+        </div>
+        <div className="split-2">
+          <label className="field">
+            Date of birth
+            <input
+              value={form.dateOfBirth}
+              placeholder="1995-04-12"
+              onChange={(event) => setForm({ ...form, dateOfBirth: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            Gender
+            <input
+              value={form.gender}
+              placeholder="Male / Female / Other"
+              onChange={(event) => setForm({ ...form, gender: event.target.value })}
+            />
+          </label>
+        </div>
+        <label className="field">
+          Allergies / medical notes
+          <input
+            value={form.allergies}
+            placeholder="Penicillin, Peanutsâ€¦"
+            onChange={(event) => setForm({ ...form, allergies: event.target.value })}
+          />
+        </label>
+        <div className="modal-actions">
+          <button className="btn-soft" type="button" onClick={() => setEditOpen(false)}>Cancel</button>
+          <button className="btn-dark" type="button" disabled={saving} onClick={() => void saveEdit()}>
+            {saving ? 'Savingâ€¦' : 'Save changes'}
+          </button>
+        </div>
+      </Modal>
     </>
   )
 }
+
