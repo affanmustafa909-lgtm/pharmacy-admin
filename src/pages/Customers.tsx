@@ -10,6 +10,14 @@ type CustomerActivity = {
   action: string
   detail: string
   createdAt: string
+  storeId?: string | null
+  meta?: Record<string, unknown> | null
+  store?: {
+    id: string
+    code: string
+    name: string
+    city: string
+  } | null
 }
 export function CustomersPage() {
   const { snapshot, go, reload, notify } = useDashboard()
@@ -199,6 +207,7 @@ export function CustomersPage() {
                 </b>
               </div>
             ) : null}
+            <div className="profile-stat"><span>Customer ID</span><b>{current.id}</b></div>
             <div className="profile-stat"><span>Customer since</span><b>{current.since}</b></div>
             <div className="profile-stat"><span>Last login</span><b>{current.lastLogin ? new Date(current.lastLogin).toLocaleString() : "Never logged in"}</b></div>
             <div className="profile-stat"><span>Orders</span><b>{orders.length} in this view</b></div>
@@ -219,11 +228,21 @@ export function CustomersPage() {
                       ? 'Account registered'
                       : activity.action === 'customer.login'
                         ? 'Customer login'
-                        : activity.action === 'customer.profile_updated'
-                          ? 'Profile updated'
-                          : activity.action}
+                        : activity.action === 'customer.store_selected'
+                          ? 'Pharmacy selected'
+                          : activity.action === 'customer.profile_updated'
+                            ? 'Profile updated'
+                            : activity.action}
                   </span>
                   <b>{activity.detail || 'Activity recorded'}</b>
+                  {activity.store ? (
+                    <span className="mini">
+                      Pharmacy: {activity.store.name} ({activity.store.code})
+                      {activity.store.city ? ` · ${activity.store.city}` : ''}
+                    </span>
+                  ) : activity.action === 'customer.store_selected' ? (
+                    <span className="mini">Pharmacy details unavailable</span>
+                  ) : null}
                   <span className="mini">
                     {new Date(activity.createdAt).toLocaleString()}
                   </span>

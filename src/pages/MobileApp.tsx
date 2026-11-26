@@ -22,10 +22,10 @@ const FALLBACK_CONFIG: MobileConfig = {
   ],
   paymentMethods: [
     { id: 'apple', type: 'apple_pay', label: 'Apple Pay' },
-    { id: 'visa', type: 'card', label: 'Visa', detail: '•••• 4829' },
+    { id: 'visa', type: 'card', label: 'Visa', detail: 'Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢ 4829' },
   ],
   aiMessages: [
-    { id: 'm1', role: 'assistant', text: 'Hi — I’m Hera AI. Ask me about medicines, side effects, or what to take for common symptoms.' },
+    { id: 'm1', role: 'assistant', text: 'Hi Ã¢â‚¬â€ IÃ¢â‚¬â„¢m Hera AI. Ask me about medicines, side effects, or what to take for common symptoms.' },
     { id: 'm2', role: 'user', text: 'I have a mild headache and fever. What should I take?' },
     { id: 'm3', role: 'assistant', text: 'For mild headache and fever, Yakapsule 500mg is commonly recommended.' },
   ],
@@ -43,7 +43,7 @@ export function MobileAppPage() {
   const [promos, setPromos] = useState<PromoCode[]>(snapshot?.promos ?? [])
   const [promoForm, setPromoForm] = useState(emptyPromo)
   const [reminderForm, setReminderForm] = useState({
-    customerName: 'Michael Johnson',
+    customerId: '',
     medicine: '',
     time: '8:00 AM',
     frequency: 'Once daily',
@@ -97,6 +97,14 @@ export function MobileAppPage() {
   }
 
   async function createReminder() {
+    if (!reminderForm.customerId) {
+      notify('Please select a registered customer')
+      return
+    }
+    if (!reminderForm.medicine.trim()) {
+      notify('Please enter a medicine name')
+      return
+    }
     try {
       await apiFetch('/admin/reminders', {
         method: 'POST',
@@ -104,9 +112,19 @@ export function MobileAppPage() {
       })
       setReminderForm((prev) => ({ ...prev, medicine: '' }))
       await reload()
-      notify('Reminder created for the app')
+      notify('Reminder created for the selected customer')
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Could not create reminder')
+    }
+  }
+
+  async function toggleReminder(id: string) {
+    try {
+      await apiFetch('/admin/reminders/' + id + '/toggle', { method: 'POST', body: JSON.stringify({}) })
+      await reload()
+      notify('Reminder status updated')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not update reminder')
     }
   }
 
@@ -124,7 +142,7 @@ export function MobileAppPage() {
           <p className="sub">Manage what customers see in the Hera app: home, checkout helpers, promos, AI copy, and reminders.</p>
         </div>
         <button className="btn-dark" type="button" disabled={saving} onClick={() => void saveConfig()}>
-          {saving ? 'Saving…' : 'Save app content'}
+          {saving ? 'SavingÃ¢â‚¬Â¦' : 'Save app content'}
         </button>
       </div>
 
@@ -259,7 +277,7 @@ export function MobileAppPage() {
             {promos.map((promo) => (
               <div className={promo.active ? 'offer is-on' : 'offer'} key={promo.id}>
                 <h3>{promo.code}</h3>
-                <p>{promo.label} · ${promo.discount.toFixed(2)} off</p>
+                <p>{promo.label} Ã‚Â· ${promo.discount.toFixed(2)} off</p>
                 <div className="spacer">
                   <Toggle on={promo.active} label={promo.code} onClick={() => void togglePromo(promo)} />
                   <button className="btn-soft" type="button" onClick={() => void removePromo(promo.id)}>
@@ -297,20 +315,36 @@ export function MobileAppPage() {
             <div className="history-row" key={reminder.id}>
               <div>
                 <b>{reminder.medicine}</b>
-                <div className="mini">{reminder.customerName} · {reminder.time} · {reminder.frequency}</div>
+                <div className="mini">
+                  {reminder.customerName} Â· {reminder.time} Â· {reminder.frequency} Â· {reminder.enabled ? 'Enabled' : 'Disabled'}
+                </div>
               </div>
-              <button className="btn-soft" type="button" onClick={() => void removeReminder(reminder.id)}>
-                <Trash2 size={14} />
-              </button>
+              <div className="spacer">
+                <button className="btn-soft" type="button" onClick={() => void toggleReminder(reminder.id)}>
+                  {reminder.enabled ? 'Disable' : 'Enable'}
+                </button>
+                <button className="btn-soft" type="button" onClick={() => void removeReminder(reminder.id)}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
           ))}
+          {(snapshot?.reminders ?? []).length === 0 && (
+            <p className="sub">No patient reminders have been created yet.</p>
+          )}
         </div>
-        <div className="modal-actions" style={{ marginTop: 16, flexWrap: 'wrap', gap: 8 }}>
-          <input
-            placeholder="Patient name"
-            value={reminderForm.customerName}
-            onChange={(e) => setReminderForm({ ...reminderForm, customerName: e.target.value })}
-          />
+        <div className="modal-actions" style={{ marginTop: 16, flexWrap: "wrap", gap: 8 }}>
+          <select
+            value={reminderForm.customerId}
+            onChange={(e) => setReminderForm({ ...reminderForm, customerId: e.target.value })}
+          >
+            <option value="">Select registered customer</option>
+            {(snapshot?.customers ?? []).map((customer) => (
+              <option key={customer.id} value={customer.id}>
+                {customer.name} â€” {customer.email}
+              </option>
+            ))}
+          </select>
           <input
             placeholder="Medicine"
             value={reminderForm.medicine}
@@ -326,9 +360,17 @@ export function MobileAppPage() {
             value={reminderForm.frequency}
             onChange={(e) => setReminderForm({ ...reminderForm, frequency: e.target.value })}
           />
-          <button className="btn-dark" type="button" onClick={() => void createReminder()}>
+          <button
+            className="btn-dark"
+            type="button"
+            disabled={!reminderForm.customerId || !reminderForm.medicine.trim()}
+            onClick={() => void createReminder()}
+          >
             <Plus size={14} /> Add reminder
           </button>
+          {(snapshot?.customers ?? []).length === 0 && (
+            <p className="sub">No registered customers are available to select.</p>
+          )}
         </div>
       </section>
     </>

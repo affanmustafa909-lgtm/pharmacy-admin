@@ -1,4 +1,4 @@
-/** Admin contracts. Shaped so a future API can return this snapshot to the dashboard
+﻿/** Admin contracts. Shaped so a future API can return this snapshot to the dashboard
  * and the same entities can be reconciled with the mobile app (orders, pharmacies, reminders). */
 
 export type PageId =
@@ -276,6 +276,18 @@ export interface CustomerAddressSummary {
   postalCode?: string
 }
 
+export interface CustomerAddressSummary {
+  id: string
+  label: string
+  line: string
+  street?: string
+  subCity?: string
+  city?: string
+  state?: string
+  country?: string
+  postalCode?: string
+}
+
 export interface Customer {
   id: string
   lastLogin?: string | null
@@ -316,6 +328,8 @@ export interface PharmacyLocation {
   maxDeliveryDistanceKm?: number | null
   openUntil: string
   weeklyHours?: Record<string, { open: string; close: string } | null>
+  closedDays?: string[]
+  holidayHours?: unknown[]
   rating: number
   isOpen: boolean
   acceptingOrders?: boolean
@@ -328,6 +342,7 @@ export interface PharmacyLocation {
 }
 
 export interface Reminder {
+  customerId?: string | null
   id: string
   customerName: string
   medicine: string

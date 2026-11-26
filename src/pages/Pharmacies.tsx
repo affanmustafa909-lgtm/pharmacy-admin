@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from 'react'
 import { MapPin, Phone, Star } from 'lucide-react'
 import { Modal } from '../components/Modal'
@@ -142,6 +141,15 @@ const emptyCreate = () => ({
   expressDelivery: '6.50',
 })
 
+const scheduleDays = [
+  { key: 'mon', label: 'Monday' },
+  { key: 'tue', label: 'Tuesday' },
+  { key: 'wed', label: 'Wednesday' },
+  { key: 'thu', label: 'Thursday' },
+  { key: 'fri', label: 'Friday' },
+  { key: 'sat', label: 'Saturday' },
+  { key: 'sun', label: 'Sunday' },
+]
 export function PharmaciesPage() {
   const {
     snapshot,
@@ -195,6 +203,11 @@ export function PharmaciesPage() {
     country: '',
     maxDeliveryDistanceKm: '30',
   })
+  const [weeklyHours, setWeeklyHours] = useState<
+    Record<string, { open: string; close: string } | null>
+  >({})
+  const [closedDays, setClosedDays] = useState<string[]>([])
+  const [holidayHoursText, setHolidayHoursText] = useState('[]')
 
   useEffect(() => {
     if (!activeStore) return
@@ -205,6 +218,12 @@ export function PharmaciesPage() {
     })
   }, [activeStore?.id, activeStore?.city, activeStore?.country, activeStore?.maxDeliveryDistanceKm])
 
+  useEffect(() => {
+    if (!activeStore) return
+    setWeeklyHours(activeStore.weeklyHours ?? {})
+    setClosedDays(activeStore.closedDays ?? [])
+    setHolidayHoursText(JSON.stringify(activeStore.holidayHours ?? [], null, 2))
+  }, [activeStore?.id])
   const [storeQuery, setStoreQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StoreStatus | 'all'>('all')
   const [saveAsDraft, setSaveAsDraft] = useState(true)
@@ -827,6 +846,135 @@ export function PharmaciesPage() {
               </button>
             </div>
 
+            <div className="mt">
+              <div className="block-head">
+                <h2>Store working hours</h2>
+                <span className="count-pill">Pakistan time</span>
+              </div>
+              <p className="sub">
+                Timezone: Asia/Karachi. Opening time is included; closing time is excluded.
+                Leave a day blank for no weekly time restriction.
+              </p>
+
+              {scheduleDays.map((day) => {
+                const hours = weeklyHours[day.key] ?? null
+                return (
+                  <div className="profile-stat" key={day.key}>
+                    <strong>{day.label}</strong>
+                    <label className="field">
+                      <input
+                        type="checkbox"
+                        checked={closedDays.includes(day.key)}
+                        onChange={(event) =>
+                          setClosedDays((current) =>
+                            event.target.checked
+                              ? [...current, day.key]
+                              : current.filter((item) => item !== day.key),
+                          )
+                        }
+                      />
+                      Closed
+                    </label>
+                    <div className="split-2">
+                      <label className="field">
+                        Opens
+                        <input
+                          type="time"
+                          value={hours?.open ?? ''}
+                          onChange={(event) =>
+                            setWeeklyHours((current) => ({
+                              ...current,
+                              [day.key]: {
+                                open: event.target.value,
+                                close: current[day.key]?.close ?? '',
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        Closes
+                        <input
+                          type="time"
+                          value={hours?.close ?? ''}
+                          onChange={(event) =>
+                            setWeeklyHours((current) => ({
+                              ...current,
+                              [day.key]: {
+                                open: current[day.key]?.open ?? '',
+                                close: event.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )
+              })}
+
+              <label className="field mt">
+                Holiday hours (JSON)
+                <textarea
+                  rows={5}
+                  value={holidayHoursText}
+                  onChange={(event) => setHolidayHoursText(event.target.value)}
+                  placeholder={'[{"date":"2026-12-25","closed":true}]'}
+                />
+              </label>
+              <p className="sub">
+                Closed holiday: {`[{"date":"2026-12-25","closed":true}]`}
+                {' '}Special hours: {`[{"date":"2026-12-25","open":"10:00","close":"16:00"}]`}
+              </p>
+
+              <div className="modal-actions">
+                <button
+                  className="btn-dark"
+                  type="button"
+                  onClick={() => {
+                    const nextWeekly: Record<string, { open: string; close: string }> = {}
+                    const validTime = (value: string) =>
+                      /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+
+                    for (const day of scheduleDays) {
+                      const open = weeklyHours[day.key]?.open?.trim() ?? ''
+                      const close = weeklyHours[day.key]?.close?.trim() ?? ''
+                      if (!open && !close) continue
+                      if (!validTime(open) || !validTime(close)) {
+                        notify(`Enter valid opening and closing times for ${day.label}`)
+                        return
+                      }
+                      if (close <= open) {
+                        notify(`Closing time must be after opening time on ${day.label}`)
+                        return
+                      }
+                      nextWeekly[day.key] = { open, close }
+                    }
+
+                    let nextHolidayHours: unknown[]
+                    try {
+                      const parsed: unknown = JSON.parse(holidayHoursText)
+                      if (!Array.isArray(parsed)) {
+                        notify('Holiday hours must be a JSON array')
+                        return
+                      }
+                      nextHolidayHours = parsed
+                    } catch {
+                      notify('Holiday hours JSON is invalid')
+                      return
+                    }
+
+                    void updatePharmacy(activeStore.id, {
+                      weeklyHours: nextWeekly,
+                      closedDays,
+                      holidayHours: nextHolidayHours,
+                    })
+                  }}
+                >
+                  Save schedule
+                </button>
+              </div>
+            </div>
             <div className="profile-stat">
               <span>Revenue today</span>
               <b>{money(activeStore.revenueToday, 0)}</b>
