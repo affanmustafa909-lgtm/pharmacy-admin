@@ -31,7 +31,10 @@ function imageSrc(url?: string) {
 }
 
 export function ProductImport({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { notify, reload, activeStoreId, activeStore } = useDashboard()
+  const { notify, reload, activeStore, snapshot } = useDashboard()
+  const pharmacies = snapshot?.pharmacies ?? []
+  const [pickedStoreId, setPickedStoreId] = useState('')
+  const targetStore = activeStore ?? pharmacies.find((item) => item.id === pickedStoreId) ?? null
   const fileRef = useRef<HTMLInputElement>(null)
   const [headers, setHeaders] = useState<string[]>([])
   const [rawRows, setRawRows] = useState<string[][]>([])
@@ -62,19 +65,33 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
     clearFileInput()
   }
 
-  function mapWithStoreCode(base: MapState): MapState {
-    if (!activeStore?.code) return base
-    return { ...base, storeCode: base.storeCode || activeStore.code }
+  function mapWithStoreCode(base: MapState, store = targetStore): MapState {
+    if (!store?.code) return base
+    return { ...base, storeCode: store.code }
   }
 
   useEffect(() => {
-    if (!open) resetState()
+    if (!open) {
+      resetState()
+      setPickedStoreId('')
+    }
   }, [open])
 
   useEffect(() => {
-    if (!open || !activeStore?.code) return
+    if (!open || !targetStore?.code) return
     setMap((current) => mapWithStoreCode(current))
-  }, [open, activeStore?.code])
+  }, [open, targetStore?.code])
+
+  function chooseStore(id: string) {
+    setPickedStoreId(id)
+    const store = pharmacies.find((item) => item.id === id)
+    if (!store) return
+    if (headers.length > 0) {
+      const next = mapWithStoreCode(map, store)
+      setMap(next)
+      void refreshPreviewWith(next, headers, rawRows, embeddedImageUrls, store)
+    }
+  }
 
   function handleClose() {
     resetState()
@@ -93,6 +110,11 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
 
   async function onFile(file: File | undefined) {
     if (!file) return
+    if (!targetStore) {
+      setNote('Choose the store first, then choose the Excel file.')
+      clearFileInput()
+      return
+    }
     setBusy(true)
     setNote('')
     setFileLabel(file.name)
@@ -106,7 +128,7 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
       const suggested = mapWithStoreCode(payload.suggestedMap)
       setMap(suggested)
       setRows(payload.rows)
-      if (activeStore?.code && suggested.storeCode) {
+      if (targetStore?.code && suggested.storeCode) {
         void refreshPreviewWith(suggested, payload.headers, payload.rawRows, payload.embeddedImageUrls ?? [])
       }
       setNote(`Loaded ${payload.rows.length} row${payload.rows.length === 1 ? '' : 's'} from ${file.name}. Choose Excel again anytime to replace.`)
@@ -127,6 +149,7 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
     nextHeaders = headers,
     nextRawRows = rawRows,
     nextEmbedded = embeddedImageUrls,
+    store = targetStore,
   ) {
     if (nextHeaders.length === 0) return
     setBusy(true)
@@ -138,8 +161,8 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
           rawRows: nextRawRows,
           embeddedImageUrls: nextEmbedded,
           map: nextMap,
-          storeId: activeStoreId ?? undefined,
-          storeCode: activeStore?.code,
+          storeId: store?.id,
+          storeCode: store?.code,
         }),
       })) as { rows: PreviewRow[] }
       setRows(payload.rows)
@@ -166,8 +189,8 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
           embeddedImageUrls,
           map,
           duplicateStrategy: strategy,
-          storeId: activeStoreId ?? undefined,
-          storeCode: activeStore?.code,
+          storeId: targetStore?.id,
+          storeCode: targetStore?.code,
         }),
       })) as {
         saved: number
@@ -223,9 +246,19 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
       open={open}
       wide
       title="Import medicines"
-      subtitle={activeStore ? `Importing into ${activeStore.name}${activeStore.code ? ` (${activeStore.code})` : ''}` : 'Map columns, review row errors, then save.'}
+      subtitle={targetStore ? `Importing into ${targetStore.name}${targetStore.code ? ` (${targetStore.code})` : ''}` : 'Choose the store, then pick the Excel file.'}
       onClose={handleClose}
     >
+      {!activeStore ? (
+        <label className="field">Import into which store?
+          <select value={pickedStoreId} onChange={(event) => chooseStore(event.target.value)}>
+            <option value="">Choose store…</option>
+            {pharmacies.map((item) => (
+              <option key={item.id} value={item.id}>{item.name}{item.code ? ` (${item.code})` : ''}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <div className="btn-row">
         <button className="btn-soft" type="button" onClick={() => void downloadTemplate()}>Download template</button>
         <label className="btn-soft">
@@ -242,8 +275,8 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
           <button className="btn-soft" type="button" onClick={resetState}>Clear file</button>
         ) : null}
       </div>
-      {activeStore?.code ? (
-        <p className="sub">Store code <strong>{activeStore.code}</strong> is applied to every mapped row.</p>
+      {targetStore?.code ? (
+        <p className="sub">Store code <strong>{targetStore.code}</strong> is applied to every row.</p>
       ) : null}
       {headers.length > 0 ? (
         <div className="split mt">
@@ -251,8 +284,8 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
             <label className="field" key={field}>
               {field}
               <select
-                value={field === 'storeCode' && activeStore?.code ? activeStore.code : map[field]}
-                disabled={field === 'storeCode' && Boolean(activeStore?.code)}
+                value={field === 'storeCode' && targetStore?.code ? targetStore.code : map[field]}
+                disabled={field === 'storeCode' && Boolean(targetStore?.code)}
                 onChange={(event) => {
                   const next = { ...map, [field]: event.target.value }
                   setMap(next)

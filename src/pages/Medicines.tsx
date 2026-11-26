@@ -5,6 +5,8 @@ import { ProductImport } from '../components/ProductImport'
 import { Toggle } from '../components/Toggle'
 import { useDashboard } from '../context/DashboardContext'
 import { money } from '../lib/format'
+import { normalizeExpiry } from '../lib/expiry'
+import { expiryLabel, expiryState, formatExpiry } from '../lib/expiry-Status'
 import { hashQuery } from '../nav'
 import { API_BASE, apiFetch } from '../services/http'
 
@@ -26,6 +28,10 @@ const REASON_LABEL: Record<string, string> = {
   expiry: 'Expired write-off',
   manual_adjustment: 'Manual adjustment',
   import: 'Import',
+  opening_balance: 'Opening balance',
+  purchase_receive: 'Purchase received',
+  transfer_out: 'Transfer out',
+  transfer_in: 'Transfer in',
 }
 
 function StockHistory({ productId, stock, onChanged }: { productId: string; stock: number; onChanged: () => void }) {
@@ -149,22 +155,7 @@ function StockHistory({ productId, stock, onChanged }: { productId: string; stoc
 
 const CATEGORY_OPTIONS = ['Medicines', 'Vitamins', 'Supplements', 'Devices']
 
-/** Medicines with this many days (or fewer) left show as expiring in red. */
-const EXPIRY_WARN_DAYS = 60
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
-
-function parseExpiry(value?: string): Date | null {
-  const text = (value ?? '').trim()
-  const full = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
-  if (full) return new Date(Number(full[1]), Number(full[2]) - 1, Number(full[3]), 23, 59, 59)
-  const match = /^(\d{1,2})\/(\d{2}|\d{4})$/.exec(text)
-  if (!match) return null
-  const month = Number(match[1])
-  let year = Number(match[2])
-  if (year < 100) year += 2000
-  if (month < 1 || month > 12) return null
-  return new Date(year, month, 0, 23, 59, 59)
-}
 
 function pad(n: number) {
   return String(n).padStart(2, '0')
@@ -180,22 +171,21 @@ function todayIso() {
 
 /** Converts any supported expiry format (YYYY-MM-DD or MM/YY) to YYYY-MM-DD for the date input. */
 function expiryToIso(value?: string) {
-  const date = parseExpiry(value)
-  return date ? toIsoDate(date) : ''
+  return normalizeExpiry(value) ?? ''
 }
 
-function daysLeft(value?: string): number | null {
-  const date = parseExpiry(value)
-  if (!date) return null
-  return Math.ceil((date.getTime() - Date.now()) / 86400000)
+/** Same expiry rule as the Overview page (see lib/expiryStatus.ts). */
+function expiryInfo(value?: string | null): { state: 'expired' | 'soon' | 'ok'; label: string } {
+  const state = expiryState(value)
+  return {
+    state: state === 'expired' ? 'expired' : state === 'soon' ? 'soon' : 'ok',
+    label: expiryLabel(value),
+  }
 }
 
-function expiryInfo(value?: string): { state: 'expired' | 'soon' | 'ok'; label: string } {
-  const days = daysLeft(value)
-  if (days === null) return { state: 'ok', label: value || '—' }
-  if (days <= 0) return { state: 'expired', label: 'Expired' }
-  if (days <= EXPIRY_WARN_DAYS) return { state: 'soon', label: `${days} ${days === 1 ? 'day' : 'days'} left` }
-  return { state: 'ok', label: value ?? '' }
+/** Expiry alerts only count medicines that still have stock (same as the Overview page). */
+function alertState(item: { stock: number; expiry?: string | null }) {
+  return item.stock > 0 ? expiryInfo(item.expiry).state : 'ok'
 }
 
 function productImageSrc(imageUrl?: string) {
@@ -264,7 +254,7 @@ export function MedicinesPage() {
       if (stockFilter === 'out' && !outOfStock) return false
       if (stockFilter === 'low' && !low) return false
       if (stockFilter === 'in_stock' && outOfStock) return false
-      const expState = expiryInfo(item.expiry).state
+      const expState = alertState(item)
       if (stockFilter === 'expiring' && expState !== 'soon') return false
       if (stockFilter === 'expired' && expState !== 'expired') return false
       if (!q) return true
@@ -300,19 +290,20 @@ export function MedicinesPage() {
   }
 
   const low = medicines.filter((item) => item.lowStockAlerts && item.stock > 0 && item.stock <= threshold)
-  const expiredCount = medicines.filter((item) => expiryInfo(item.expiry).state === 'expired').length
-  const expiringCount = medicines.filter((item) => expiryInfo(item.expiry).state === 'soon').length
+  const expiredCount = medicines.filter((item) => alertState(item) === 'expired').length
+  const expiringCount = medicines.filter((item) => alertState(item) === 'soon').length
   const storeMeds = allMedicines.filter((item) => storeFilter === 'all' || item.storeId === storeFilter)
   const alertOut = storeMeds.filter((item) => item.stock <= 0)
   const alertLow = storeMeds.filter((item) => item.lowStockAlerts && item.stock > 0 && item.stock <= threshold)
-  const alertSoon = storeMeds.filter((item) => expiryInfo(item.expiry).state === 'soon')
-  const alertExpired = storeMeds.filter((item) => expiryInfo(item.expiry).state === 'expired')
+  const alertSoon = storeMeds.filter((item) => alertState(item) === 'soon')
+  const alertExpired = storeMeds.filter((item) => alertState(item) === 'expired')
   const alertTiles = [
     { key: 'out' as const, label: 'Out of stock', list: alertOut },
     { key: 'low' as const, label: 'Low stock', list: alertLow },
     { key: 'expiring' as const, label: 'Expiring soon', list: alertSoon },
     { key: 'expired' as const, label: 'Expired', list: alertExpired },
   ]
+  const scopeName = activeStore?.name ?? (storeFilter === 'all' ? 'All stores' : pharmacies.find((p) => p.id === storeFilter)?.name ?? '—')
 
   function selectMedicine(id: string) {
     setSelectedId(id)
@@ -407,6 +398,31 @@ export function MedicinesPage() {
       notify('Enter a medicine name')
       return
     }
+    if (name.length < 2 || !/[A-Za-z]{2}/.test(name) || !/^[A-Za-z0-9][A-Za-z0-9 .,'()/&+-]*$/.test(name)) {
+      notify('Enter a valid medicine name (letters, at least 2 characters, no symbols like @ # $)')
+      return
+    }
+    const sku = form.sku.trim()
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{1,39}$/.test(sku)) {
+      notify('Enter a SKU (2-40 characters: letters, numbers, - or _)')
+      return
+    }
+    if (!form.batch.trim()) {
+      notify('Enter the batch number')
+      return
+    }
+    if (!form.expiry.trim()) {
+      notify('Choose the expiry date')
+      return
+    }
+    if (!form.strength.trim() || !/\d/.test(form.strength)) {
+      notify('Enter the strength with a number, e.g. 500mg')
+      return
+    }
+    if (!form.unitLabel.trim()) {
+      notify('Enter the pack, e.g. 30 tablets')
+      return
+    }
     if (form.category === '__custom__' && !form.customCategory.trim()) {
       notify('Enter a custom category')
       return
@@ -441,6 +457,13 @@ export function MedicinesPage() {
       notify('This medicine with the same batch already exists in this store')
       return
     }
+    const skuTaken = allMedicines.some(
+      (item) => item.id !== editingId && item.storeId === storeId && (item.sku ?? '').trim().toLowerCase() === sku.toLowerCase(),
+    )
+    if (skuTaken) {
+      notify('This SKU is already used by another medicine in this store')
+      return
+    }
 
     const payload = {
       storeId,
@@ -452,7 +475,7 @@ export function MedicinesPage() {
       price,
       unitLabel: form.unitLabel.trim() || '1 unit',
       stock,
-      sku: form.sku.trim() || undefined,
+      sku,
       description: form.description.trim() || undefined,
       batch: batch || undefined,
       expiry: expiry || undefined,
@@ -555,7 +578,7 @@ export function MedicinesPage() {
           style={{ minWidth: 240 }}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search name, brand, batch…"
+          placeholder="Search name, SKU, brand, batch…"
           aria-label="Search medicines"
         />
         {(['all', 'in_stock', 'low', 'out', 'expiring', 'expired'] as const).map((filter) => (
@@ -569,6 +592,7 @@ export function MedicinesPage() {
           {expiredCount ? ` · ${expiredCount} expired` : ''}
           {expiringCount ? ` · ${expiringCount} expiring` : ''}
         </span>
+        <span className="count-pill">Store: {scopeName} · as of {new Date().toLocaleDateString()}</span>
       </div>
 
       {alertTiles.some((tile) => tile.list.length > 0) ? (
@@ -608,6 +632,7 @@ export function MedicinesPage() {
                 <tr>
                   <th>Pic</th>
                   <th>Name</th>
+                  <th>SKU</th>
                   <th>Store</th>
                   <th>Category</th>
                   <th>Price</th>
@@ -636,17 +661,18 @@ export function MedicinesPage() {
                       )}
                     </td>
                     <td><strong>{item.name}</strong><div className="sub">{item.brand} · {item.unitLabel}</div></td>
+                    <td>{item.sku || '—'}</td>
                     <td>{item.storeName ?? '—'}</td>
                     <td>{item.category}</td>
                     <td>{money(item.price)}</td>
                     <td>{item.stock}</td>
                     <td>
                       {exp.state === 'ok' ? (
-                        item.expiry || '—'
+                        formatExpiry(item.expiry)
                       ) : (
                         <span style={{ color: '#d92d20', fontWeight: 600 }}>
                           {exp.label}
-                          <div className="sub" style={{ color: '#d92d20' }}>{item.expiry}</div>
+                          <div className="sub" style={{ color: '#d92d20' }}>{formatExpiry(item.expiry)}</div>
                         </span>
                       )}
                     </td>
@@ -704,7 +730,7 @@ export function MedicinesPage() {
                     <div>
                       <small>EXP</small>
                       <b style={selectedExpiry && selectedExpiry.state !== 'ok' ? { color: '#d92d20' } : undefined}>
-                        {medicine.expiry || '—'}
+                        {formatExpiry(medicine.expiry)}
                       </b>
                     </div>
                     <div><small>STOCK</small><b>{medicine.stock}</b></div>
@@ -713,6 +739,7 @@ export function MedicinesPage() {
                 <div className="face back">
                   <div className="face-top"><span className="pill-lite">{medicine.unitLabel}</span><b>{money(medicine.price)}</b></div>
                   <h3>Batch {medicine.batch || '—'}</h3>
+                  <p>SKU: {medicine.sku || '—'}</p>
                   <p>{medicine.description}</p>
                 </div>
               </div>
@@ -788,13 +815,16 @@ export function MedicinesPage() {
         <label className="field">Name
           <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
         </label>
+        <label className="field">SKU (required)
+          <input value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} placeholder="e.g. OK-001" />
+        </label>
         <label className="field">Brand
           <input value={form.brand} onChange={(event) => setForm({ ...form, brand: event.target.value })} />
         </label>
         <label className="field">Generic name
           <input value={form.genericName} onChange={(event) => setForm({ ...form, genericName: event.target.value })} placeholder="e.g. Paracetamol" />
         </label>
-        <label className="field">Strength
+        <label className="field">Strength (required)
           <input value={form.strength} onChange={(event) => setForm({ ...form, strength: event.target.value })} placeholder="e.g. 500mg" />
         </label>
         <label className="field">Category
@@ -810,19 +840,19 @@ export function MedicinesPage() {
             <input value={form.customCategory} onChange={(event) => setForm({ ...form, customCategory: event.target.value })} />
           </label>
         ) : null}
-        <label className="field">Pack
+        <label className="field">Pack (required)
           <input value={form.unitLabel} onChange={(event) => setForm({ ...form, unitLabel: event.target.value })} />
         </label>
-        <label className="field">Price
+        <label className="field">Price (required)
           <input inputMode="decimal" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} placeholder="e.g. 12.50" />
         </label>
-        <label className="field">Stock
+        <label className="field">Stock (required)
           <input inputMode="numeric" value={form.stock} onChange={(event) => setForm({ ...form, stock: event.target.value })} placeholder="e.g. 20" />
         </label>
-        <label className="field">Batch
+        <label className="field">Batch (required)
           <input value={form.batch} onChange={(event) => setForm({ ...form, batch: event.target.value })} placeholder="e.g. CC-26-041" />
         </label>
-        <label className="field">Expiry
+        <label className="field">Expiry (required)
           <input
             type="date"
             min={editing ? undefined : todayIso()}
