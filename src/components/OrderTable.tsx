@@ -1,4 +1,4 @@
-import { formatWhen, money, orderFlowStatuses, orderLabel } from '../lib/format'
+import { formatWhen, isPickupOrder, money, orderFlowStatuses, orderLabel } from '../lib/format'
 import { useDashboard } from '../context/DashboardContext'
 import type { AdminOrder, OrderStatus } from '../types'
 
@@ -20,6 +20,7 @@ export function OrderTable({ orders, onOpen }: { orders: AdminOrder[]; onOpen: (
             <th>Products</th>
             <th>Delivery</th>
             <th>Total</th>
+            <th>Rider</th>
             <th>Status</th>
             <th>Date</th>
           </tr>
@@ -39,6 +40,9 @@ export function OrderTable({ orders, onOpen }: { orders: AdminOrder[]; onOpen: (
               <td>{money(order.productSubtotal ?? 0)}</td>
               <td>{money(order.deliveryCharge ?? 0)}</td>
               <td><strong>{money(order.total)}</strong></td>
+              <td>
+                {isPickupOrder(order) ? '—' : order.riderName ? <strong>{order.riderName}</strong> : <span className="mini">Not assigned</span>}
+              </td>
               <td onClick={(event) => event.stopPropagation()}>
                 <label className="status-edit">
                   <i className={`dot ${order.status}`} />

@@ -22,6 +22,7 @@ import {
   ShoppingBag,
   Smartphone,
   Sun,
+  TrendingUp,
   Truck,
   UserCog,
   Users,
@@ -29,6 +30,7 @@ import {
 import { useDashboard } from '../context/DashboardContext'
 import { STORE_TOP_NAV, TOP_NAV } from '../nav'
 import type { PageId } from '../types'
+import { AnalyticsPage } from '../pages/Analytics'
 import { AuditPage } from '../pages/Audit'
 import { CustomersPage } from '../pages/Customers'
 import { MedicinesPage } from '../pages/Medicines'
@@ -58,6 +60,7 @@ const PAGES: Record<PageId, () => ReactNode> = {
   reminders: RemindersPage,
   mobile: MobileAppPage,
   reports: ReportsPage,
+  analytics: AnalyticsPage,
   audit: AuditPage,
   messages: MessagesPage,
   settings: SettingsPage,
@@ -75,6 +78,7 @@ const RAIL: { id: PageId; label: string; icon: typeof LayoutGrid }[] = [
   { id: 'reminders', label: 'Reminders', icon: HeartPulse },
   { id: 'mobile', label: 'Mobile App', icon: Smartphone },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
+  { id: 'analytics', label: 'Analytics', icon: TrendingUp },
   { id: 'audit', label: 'Audit', icon: ClipboardList },
   { id: 'messages', label: 'Messages', icon: MessageSquare },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -87,6 +91,7 @@ const STORE_RAIL: { id: PageId; label: string; icon: typeof LayoutGrid }[] = [
   { id: 'purchasing', label: 'Purchasing', icon: Boxes },
   { id: 'prescriptions', label: 'Prescriptions', icon: FileText },
   { id: 'pharmacies', label: 'Delivery', icon: Truck },
+  { id: 'analytics', label: 'Analytics', icon: TrendingUp },
   { id: 'team', label: 'Team & Access', icon: UserCog },
   { id: 'settings', label: 'Store', icon: Settings },
 ]

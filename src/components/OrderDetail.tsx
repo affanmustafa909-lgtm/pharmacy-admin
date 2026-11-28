@@ -1,7 +1,11 @@
+import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
 import { formatWhen, isPickupOrder, money, orderFlowStatuses, orderLabel } from '../lib/format'
 import { useDashboard } from '../context/DashboardContext'
+import { apiFetch } from '../services/http'
 import type { AdminOrder, OrderStatus } from '../types'
+
+interface RiderOption { id: string; name: string; vehicle: string; active: boolean }
 
 function nextActions(order: AdminOrder): { label: string; status: OrderStatus }[] {
   const pickup = isPickupOrder(order)
@@ -31,8 +35,30 @@ function nextActions(order: AdminOrder): { label: string; status: OrderStatus }[
 }
 
 export function OrderDetail({ order, onClose }: { order: AdminOrder | null; onClose: () => void }) {
-  const { updateOrderStatus } = useDashboard()
+  const { updateOrderStatus, assignRider } = useDashboard()
   const actions = order ? nextActions(order) : []
+  const [riders, setRiders] = useState<RiderOption[]>([])
+  const storeId = order?.pharmacyId
+
+  useEffect(() => {
+    if (!storeId) {
+      setRiders([])
+      return
+    }
+    let cancelled = false
+    apiFetch(`/admin/riders?storeId=${encodeURIComponent(storeId)}`)
+      .then((data) => {
+        if (!cancelled) setRiders((data as { riders: RiderOption[] }).riders)
+      })
+      .catch(() => {
+        if (!cancelled) setRiders([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [storeId])
+
+  const riderLocked = order ? order.status === 'delivered' || order.status === 'cancelled' : true
 
   return (
     <Modal open={Boolean(order)} wide title={order?.id ?? 'Order'} subtitle={order ? `${order.customerName} · ${order.pharmacyName}` : undefined} onClose={onClose}>
@@ -47,6 +73,34 @@ export function OrderDetail({ order, onClose }: { order: AdminOrder | null; onCl
           <div className="profile-stat"><span>Delivery</span><b>{order.deliveryType ? order.deliveryType : '—'}</b></div>
           <div className="profile-stat"><span>Payment</span><b>{order.paymentLabel || order.paymentStatus || '—'}</b></div>
           <div className="profile-stat"><span>Address</span><b>{order.addressLine || '—'}</b></div>
+          {!isPickupOrder(order) ? (
+            <div className="profile-stat">
+              <span>Rider</span>
+              {riderLocked ? (
+                <b>{order.riderName || '—'}</b>
+              ) : (
+                <select
+                  className="select status-select"
+                  value={order.riderId ?? ''}
+                  aria-label="Assign rider"
+                  onChange={(event) => {
+                    const next = event.target.value || null
+                    if (next === (order.riderId ?? null)) return
+                    void assignRider(order.id, next)
+                  }}
+                >
+                  <option value="">Not assigned</option>
+                  {riders
+                    .filter((rider) => rider.active || rider.id === order.riderId)
+                    .map((rider) => (
+                      <option key={rider.id} value={rider.id}>
+                        {rider.name} · {rider.vehicle}{rider.active ? '' : ' (off duty)'}
+                      </option>
+                    ))}
+                </select>
+              )}
+            </div>
+          ) : null}
           <div className="profile-stat">
             <span>Status</span>
             <select

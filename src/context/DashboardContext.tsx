@@ -42,6 +42,7 @@ interface DashboardContextValue {
   notify: (text: string) => void
   run: (task: (api: PharmacyAdminApi) => Promise<void>, success: string) => Promise<boolean>
   updateOrderStatus: (id: string, status: OrderStatus) => Promise<boolean>
+  assignRider: (orderId: string, riderId: string | null) => Promise<boolean>
   createMedicine: (input: NewMedicineInput) => Promise<string | null>
   updateMedicine: (id: string, patch: Partial<Medicine>) => Promise<boolean>
   deactivateMedicine: (id: string) => Promise<boolean>
@@ -325,6 +326,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       notify: toast,
       run,
       updateOrderStatus: (id, status) => run((client) => client.updateOrderStatus(id, status), 'Order updated'),
+      assignRider: (orderId, riderId) =>
+        run((client) => client.assignRider(orderId, riderId), riderId ? 'Rider assigned' : 'Rider removed'),
       createMedicine: async (input) => {
         let id: string
         try {

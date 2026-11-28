@@ -14,6 +14,7 @@ export type PageId =
   | 'reminders'
   | 'mobile'
   | 'reports'
+  | 'analytics'
   | 'audit'
   | 'messages'
   | 'settings'
@@ -176,6 +177,9 @@ export interface AdminOrder {
   deliveryType?: string
   paymentLabel?: string
   addressLine?: string
+  riderId?: string | null
+  riderName?: string | null
+  riderPhone?: string | null
   createdAt: string
   productSubtotal?: number
   deliveryCharge?: number

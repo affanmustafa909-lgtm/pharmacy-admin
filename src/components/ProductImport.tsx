@@ -223,6 +223,34 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
   const errorCount = rows.filter((row) => row.errors.length > 0).length
   const validRows = rows.filter((row) => row.errors.length === 0).length
 
+  // Fix a value right in the preview table (no need to edit the Excel file again).
+  function cellValue(index: number, field: Field) {
+    const column = map[field] ? headers.indexOf(map[field]) : -1
+    if (column < 0) return null
+    return rawRows[index]?.[column] ?? ''
+  }
+
+  function editCell(index: number, field: Field, value: string) {
+    const column = map[field] ? headers.indexOf(map[field]) : -1
+    if (column < 0) return
+    setRawRows((current) => current.map((row, i) => (i === index ? row.map((cell, j) => (j === column ? value : cell)) : row)))
+  }
+
+  function renderCell(index: number, field: Field, width: number) {
+    const value = cellValue(index, field)
+    if (value === null) return '—'
+    return (
+      <input
+        className="select"
+        style={{ width, padding: '4px 8px' }}
+        value={value}
+        onChange={(event) => editCell(index, field, event.target.value)}
+        onBlur={() => void refreshPreviewWith(map)}
+        aria-label={field}
+      />
+    )
+  }
+
   function downloadFailedCsv() {
     if (!lastFailed.length) return
     const header = ['rowNumber', 'errors', ...Object.keys(lastFailed[0].values ?? {})]
@@ -315,7 +343,7 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
         <div className="table-wrap table-static mt">
           <table>
             <thead>
-              <tr><th>Pic</th><th>Row</th><th>Name</th><th>SKU</th><th>Result</th></tr>
+              <tr><th>Pic</th><th>Row</th><th>Name</th><th>SKU</th><th>Batch</th><th>Price</th><th>Stock</th><th>Expiry</th><th>Result</th></tr>
             </thead>
             <tbody>
               {rows.map((row, index) => {
@@ -330,8 +358,12 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
                       )}
                     </td>
                     <td>{row.rowNumber}</td>
-                    <td>{row.values.name || row.values[map.name] || '—'}</td>
-                    <td>{row.values.sku || row.values[map.sku] || '—'}</td>
+                    <td>{renderCell(index, 'name', 150)}</td>
+                    <td>{renderCell(index, 'sku', 110)}</td>
+                    <td>{renderCell(index, 'batch', 100)}</td>
+                    <td>{renderCell(index, 'price', 70)}</td>
+                    <td>{renderCell(index, 'stock', 70)}</td>
+                    <td>{renderCell(index, 'expiry', 110)}</td>
                     <td className={row.errors.length ? 'import-error' : ''}>
                       {row.errors.length
                         ? row.errors.map((error, errorIndex) => (
@@ -355,6 +387,7 @@ export function ProductImport({ open, onClose }: { open: boolean; onClose: () =>
       {rows.length > 0 ? (
         <p className="sub mt">
           {validRows} valid · {errorCount} with errors
+          {errorCount > 0 ? ' · Fix the highlighted rows right here in the table, then click outside the box to re-check.' : ''}
         </p>
       ) : null}
       {note ? <p className="sub mt" style={{ whiteSpace: 'pre-wrap' }}>{note}</p> : null}

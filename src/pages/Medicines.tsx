@@ -464,6 +464,32 @@ export function MedicinesPage() {
       notify('This SKU is already used by another medicine in this store')
       return
     }
+    // SKU and batch belong to ONE medicine across ALL stores.
+    // The same medicine (same name) may reuse them in other stores; a different medicine may not.
+    const norm = (value?: string | null) => (value ?? '').trim().toLowerCase()
+    const skuOwner = allMedicines.find(
+      (item) => item.id !== editingId && norm(item.sku) === norm(sku) && norm(item.name) !== norm(name),
+    )
+    if (skuOwner) {
+      notify(`SKU ${sku} already belongs to "${skuOwner.name}"${skuOwner.storeName ? ` (${skuOwner.storeName})` : ''}. Use a different SKU.`)
+      return
+    }
+    const batchOwner = allMedicines.find(
+      (item) => item.id !== editingId && norm(item.batch) === norm(batch) && norm(item.name) !== norm(name),
+    )
+    if (batchOwner) {
+      notify(`Batch ${batch} already belongs to "${batchOwner.name}"${batchOwner.storeName ? ` (${batchOwner.storeName})` : ''}. Use a different batch.`)
+      return
+    }
+    // The same medicine in another store must use the same SKU as there (batch may differ).
+    const sameMedicineElsewhere = allMedicines.filter(
+      (item) => item.id !== editingId && item.storeId !== storeId && norm(item.name) === norm(name),
+    )
+    if (sameMedicineElsewhere.length > 0 && !sameMedicineElsewhere.some((item) => norm(item.sku) === norm(sku))) {
+      const first = sameMedicineElsewhere[0]
+      notify(`"${first.name}" already exists in ${first.storeName ?? 'another store'} with SKU ${first.sku}. Use the same SKU.`)
+      return
+    }
 
     const payload = {
       storeId,

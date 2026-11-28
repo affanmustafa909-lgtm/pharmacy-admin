@@ -4,6 +4,7 @@ import { apiFetch } from './http'
 export interface PharmacyAdminApi {
   getSnapshot(): Promise<AdminSnapshot>
   updateOrderStatus(id: string, status: OrderStatus): Promise<void>
+  assignRider(orderId: string, riderId: string | null): Promise<void>
   createMedicine(input: NewMedicineInput): Promise<{ id: string }>
   updateMedicine(id: string, patch: Partial<Medicine>): Promise<void>
   deactivateMedicine(id: string): Promise<void>
@@ -48,6 +49,10 @@ export class HttpPharmacyApi implements PharmacyAdminApi {
 
   updateOrderStatus(id: string, status: OrderStatus) {
     return post(`/admin/orders/${encodeURIComponent(id)}/status`, { status })
+  }
+
+  assignRider(orderId: string, riderId: string | null) {
+    return post(`/admin/orders/${encodeURIComponent(orderId)}/rider`, { riderId })
   }
 
   createMedicine(input: NewMedicineInput) {

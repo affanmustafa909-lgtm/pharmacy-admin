@@ -59,7 +59,7 @@ interface MyPrescription {
 }
 
 type CartLine = { product: ProductItem; quantity: number }
-type Tab = 'medicines' | 'cart' | 'orders' | 'prescriptions'
+type Tab = 'medicines' | 'cart' | 'orders' | 'prescriptions' | 'complaints'
 type Quote = { total: number; productSubtotal: number; deliveryCharge: number; serviceCharge: number; bfpCharge: number; discount: number; etaMinutes?: number }
 
 class ApiError extends Error {
@@ -161,6 +161,156 @@ const card = { background: 'white', padding: 20, marginBottom: 15, borderRadius:
 const btn = { padding: '8px 14px', borderRadius: 8, border: 'none', cursor: 'pointer' } as const
 const green = { ...btn, background: '#1f7a4d', color: 'white' } as const
 
+type MyComplaint = {
+  id: string
+  number: string
+  orderNumber: string
+  category: string
+  subject: string
+  description: string
+  status: string
+  resolution: string
+  createdAt: string
+  replies: { id: string; from: string; text: string; createdAt: string }[]
+}
+
+const COMPLAINT_STATUS: Record<string, string> = {
+  open: 'Received',
+  in_review: 'Being reviewed',
+  responded: 'Replied by pharmacy',
+  resolved: 'Resolved',
+  closed: 'Closed',
+}
+
+function ComplaintsSection({ orders }: { orders: CustomerOrder[] }) {
+  const [list, setList] = useState<MyComplaint[]>([])
+  const [orderNumber, setOrderNumber] = useState('')
+  const [category, setCategory] = useState('Delivery')
+  const [subject, setSubject] = useState('')
+  const [description, setDescription] = useState('')
+  const [reply, setReply] = useState<Record<string, string>>({})
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function load() {
+    try {
+      const data = (await customerFetch('/complaints/mine')) as { complaints: MyComplaint[] }
+      setList(data.complaints)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not load complaints')
+    }
+  }
+  useEffect(() => {
+    void load()
+  }, [])
+
+  async function submit() {
+    setErr('')
+    setMsg('')
+    setBusy(true)
+    try {
+      await customerFetch('/complaints', {
+        method: 'POST',
+        body: JSON.stringify({ orderNumber: orderNumber || undefined, category, subject, description }),
+      })
+      setSubject('')
+      setDescription('')
+      setOrderNumber('')
+      setMsg('Your complaint was sent. The pharmacy will reply here.')
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not send the complaint')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function sendReply(id: string) {
+    const text = (reply[id] ?? '').trim()
+    if (!text) return
+    setErr('')
+    try {
+      await customerFetch(`/complaints/${id}/reply`, { method: 'POST', body: JSON.stringify({ text }) })
+      setReply({ ...reply, [id]: '' })
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not send the reply')
+    }
+  }
+
+  return (
+    <section>
+      <div style={card}>
+        <h3>Make a complaint</h3>
+        <p>
+          <label>
+            Order{' '}
+            <select value={orderNumber} onChange={e => setOrderNumber(e.target.value)} style={{ padding: 8 }}>
+              <option value="">Not about an order</option>
+              {orders.map(o => (
+                <option key={o.id} value={o.id}>#{o.id} - {o.storeName}</option>
+              ))}
+            </select>
+          </label>{' '}
+          <label>
+            Type{' '}
+            <select value={category} onChange={e => setCategory(e.target.value)} style={{ padding: 8 }}>
+              {['Delivery', 'Wrong medicine', 'Quality', 'Refund', 'Staff', 'Other'].map(c => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </label>
+        </p>
+        <input
+          value={subject}
+          onChange={e => setSubject(e.target.value)}
+          placeholder="Subject"
+          style={{ width: '100%', padding: 12, margin: '4px 0 8px', boxSizing: 'border-box' }}
+        />
+        <textarea
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="What went wrong?"
+          rows={3}
+          style={{ width: '100%', padding: 12, margin: '0 0 12px', boxSizing: 'border-box' }}
+        />
+        {err && <p style={{ color: 'red' }}>{err}</p>}
+        {msg && <p style={{ color: '#1f7a4d' }}>{msg}</p>}
+        <button onClick={submit} disabled={busy} style={green}>{busy ? 'Sending...' : 'Send complaint'}</button>
+      </div>
+
+      <h3>My complaints</h3>
+      {list.length === 0 && <p>You have not made any complaints.</p>}
+      {list.map(item => (
+        <article key={item.id} style={card}>
+          <h3 style={{ margin: 0 }}>{item.number}: {item.subject}</h3>
+          <p style={{ margin: '4px 0' }}><strong>Status: {COMPLAINT_STATUS[item.status] ?? item.status}</strong></p>
+          <p style={{ margin: '4px 0' }}>{item.orderNumber ? `Order #${item.orderNumber} · ` : ''}{item.category} · {new Date(item.createdAt).toLocaleString()}</p>
+          <p style={{ margin: '4px 0' }}>{item.description}</p>
+          {item.resolution && <p style={{ margin: '4px 0' }}><strong>Resolution:</strong> {item.resolution}</p>}
+          {item.replies.map(r => (
+            <p key={r.id} style={{ margin: '4px 0', paddingLeft: 10, borderLeft: '3px solid #1f7a4d' }}>
+              <strong>{r.from}:</strong> {r.text}
+            </p>
+          ))}
+          {item.status !== 'closed' && (
+            <p>
+              <input
+                value={reply[item.id] ?? ''}
+                onChange={e => setReply({ ...reply, [item.id]: e.target.value })}
+                placeholder="Write a reply"
+                style={{ padding: 8, width: '70%' }}
+              />{' '}
+              <button onClick={() => void sendReply(item.id)} style={btn}>Reply</button>
+            </p>
+          )}
+        </article>
+      ))}
+    </section>
+  )
+}
+
 export function CustomerApp() {
   const [tab, setTab] = useState<Tab>('medicines')
   const [stores, setStores] = useState<StoreItem[]>([])
@@ -173,6 +323,9 @@ export function CustomerApp() {
   const [paymentLabel, setPaymentLabel] = useState('Cash on delivery')
   const [address, setAddress] = useState('')
   const [quote, setQuote] = useState<Quote | null>(null)
+  const [promoInput, setPromoInput] = useState('')
+  const [appliedPromo, setAppliedPromo] = useState('')
+  const [promoError, setPromoError] = useState('')
   const [loading, setLoading] = useState(true)
   const [placing, setPlacing] = useState(false)
   const [error, setError] = useState('')
@@ -184,6 +337,7 @@ export function CustomerApp() {
   const [rxStoreId, setRxStoreId] = useState('')
   const [rxFile, setRxFile] = useState<File | null>(null)
   const [rxNote, setRxNote] = useState('')
+  const [rxDoctor, setRxDoctor] = useState('')
   const [rxText, setRxText] = useState('')
   const [rxBusy, setRxBusy] = useState(false)
   const [rxError, setRxError] = useState('')
@@ -263,12 +417,23 @@ export function CustomerApp() {
       body: JSON.stringify({
         storeId,
         deliveryType,
+        ...(appliedPromo ? { promoCode: appliedPromo } : {}),
         items: cart.map(l => ({ productId: l.product.id, quantity: l.quantity })),
       }),
     })
-      .then(setQuote)
-      .catch(() => setQuote(null))
-  }, [cart, storeId, deliveryType])
+      .then(q => {
+        setQuote(q)
+        if (appliedPromo) setPromoError('')
+      })
+      .catch(err => {
+        setQuote(null)
+        if (appliedPromo) {
+          // A promo that does not work is dropped so the normal price still shows.
+          setPromoError((err instanceof Error ? err.message : 'Promo code is not valid').replace(/\s*\[.*\]$/, ''))
+          setAppliedPromo('')
+        }
+      })
+  }, [cart, storeId, deliveryType, appliedPromo])
 
   function changeStore(id: string) {
     if (cart.length > 0 && !window.confirm('Changing the store will empty your cart. Continue?')) return
@@ -305,11 +470,14 @@ export function CustomerApp() {
           deliveryType,
           paymentLabel,
           addressLine: deliveryType === 'pickup' ? '' : address.trim(),
+          ...(appliedPromo ? { promoCode: appliedPromo } : {}),
           items: cart.map(l => ({ productId: l.product.id, quantity: l.quantity })),
         }),
       })
       setCart([])
       setAddress('')
+      setAppliedPromo('')
+      setPromoInput('')
       setNotice(`Order ${result.id} placed successfully!`)
       await loadOrders()
       setRefreshKey(k => k + 1)
@@ -369,11 +537,13 @@ export function CustomerApp() {
       form.append('storeId', rxStoreId)
       form.append('image', rxFile)
       if (rxNote.trim()) form.append('customerNote', rxNote.trim())
+      if (rxDoctor.trim()) form.append('prescriber', rxDoctor.trim())
       if (rxText.trim()) form.append('scannedText', rxText.trim())
       const result = await rxFetch('', { method: 'POST', body: form })
       setNotice(`Prescription ${result.prescription?.number ?? ''} uploaded. The pharmacist will review it.`)
       setRxFile(null)
       setRxNote('')
+      setRxDoctor('')
       setRxText('')
       await loadRx()
     } catch (err) {
@@ -431,6 +601,7 @@ export function CustomerApp() {
         {tabBtn('cart', `Cart (${cartCount})`)}
         {tabBtn('orders', 'My Orders')}
         {tabBtn('prescriptions', 'Prescriptions')}
+        {tabBtn('complaints', 'Complaints')}
       </nav>
 
       {loading && <p>Loading...</p>}
@@ -510,12 +681,32 @@ export function CustomerApp() {
               {deliveryType !== 'pickup' && (
                 <input value={address} onChange={e => setAddress(e.target.value)} placeholder="Delivery address" style={{ width: '100%', padding: 12, margin: '8px 0 12px' }} />
               )}
+              <p>
+                <input
+                  value={promoInput}
+                  onChange={e => setPromoInput(e.target.value)}
+                  placeholder="Promo code"
+                  style={{ padding: 10, marginRight: 8 }}
+                />
+                <button
+                  onClick={() => {
+                    setPromoError('')
+                    setAppliedPromo(promoInput.trim().toUpperCase())
+                  }}
+                  style={btn}
+                >
+                  Apply
+                </button>
+              </p>
+              {promoError && <p style={{ color: 'red' }}>{promoError}</p>}
+              {appliedPromo && quote && <p style={{ color: '#1f7a4d' }}>Promo {appliedPromo} applied</p>}
               {quote ? (
                 <div>
                   <p style={{ margin: '4px 0' }}>Products: ${quote.productSubtotal.toFixed(2)}</p>
                   <p style={{ margin: '4px 0' }}>Delivery: ${quote.deliveryCharge.toFixed(2)}</p>
                   <p style={{ margin: '4px 0' }}>Service: ${quote.serviceCharge.toFixed(2)}</p>
                   {quote.bfpCharge > 0 && <p style={{ margin: '4px 0' }}>BFP: ${quote.bfpCharge.toFixed(2)}</p>}
+                  {quote.discount > 0 && <p style={{ margin: '4px 0', color: '#1f7a4d' }}>Discount: -${quote.discount.toFixed(2)}</p>}
                   <p><strong>Total: ${quote.total.toFixed(2)}</strong></p>
                 </div>
               ) : (
@@ -550,6 +741,8 @@ export function CustomerApp() {
         </section>
       )}
 
+      {tab === 'complaints' && !loading && <ComplaintsSection orders={orders} />}
+
       {tab === 'prescriptions' && !loading && (
         <section>
           <div style={card}>
@@ -567,6 +760,12 @@ export function CustomerApp() {
             <p>
               <input type="file" accept="image/*" onChange={e => pickRxFile(e.target.files?.[0] ?? null)} />
             </p>
+            <input
+              value={rxDoctor}
+              onChange={e => setRxDoctor(e.target.value)}
+              placeholder="Doctor name written on the prescription"
+              style={{ width: '100%', padding: 12, margin: '4px 0 8px', boxSizing: 'border-box' }}
+            />
             <input
               value={rxNote}
               onChange={e => setRxNote(e.target.value)}

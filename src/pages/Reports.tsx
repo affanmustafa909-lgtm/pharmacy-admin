@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Download } from 'lucide-react'
+import { CompliancePanel, ComplaintsPanel, PromoCampaigns } from '../components/AdminExtras'
 import { SalesChart } from '../components/SalesChart'
 import { useDashboard } from '../context/DashboardContext'
 import { formatWhen, money } from '../lib/format'
@@ -340,6 +341,9 @@ export function ReportsPage() {
           </div>
         )}
       </article>
+      <PromoCampaigns />
+      <ComplaintsPanel />
+      <CompliancePanel />
     </>
   )
 }
